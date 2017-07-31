@@ -2,7 +2,7 @@
 
 version="GY140920"
 usage="\
-deinterleave ($version): separation of interleaved FASTQ data
+deinterleave ($version): separation of interleaved FASTQ stream data
 deinterleave [-h] <out1> <out2>"
 
 while getopts ':h' option; do
