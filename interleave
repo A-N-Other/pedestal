@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-version="GY140920"
+version="GY170731"
 usage="\
-deinterleave ($version): separation of interleaved FASTQ stream data
-deinterleave [-h] <out1> <out2>"
+interleave ($version): interleaving FASTQ data
+interleave [-h] <in1> <in2>"
 
 while getopts :h option; do
     case "$option" in
@@ -19,14 +19,9 @@ while getopts :h option; do
 done
 
 if (( $# == 2 )) ; then
-    paste - - - - - - - - \
-    | tee \
-        >(cut -f 1-4 \
-        | tr "\t" "\n" \
-        > $1) \
-    | cut -f 5-8 \
-    | tr "\t" "\n" \
-    > $2
+    paste $1 $2 \
+    | paste - - - - | \
+    awk 'BEGIN {FS="\t";OFS="\n"} {print $1,$3,$5,$7,$2,$4,$6,$8}'
 else
     echo "$usage"
     exit 1
