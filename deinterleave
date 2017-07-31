@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+version="GY140920"
+usage="\
+deinterleave ($version): separation of interleaved FASTQ data
+deinterleave [-h] <out1> <out2>"
+
+while getopts ':h' option; do
+    case "$option" in
+        h)
+            echo "$usage"
+            exit
+            ;;
+        \?)
+            echo "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if (( $# == 2 )) ; then
+    paste - - - - - - - - \
+    | tee \
+        >(cut -f 1-4 \
+        | tr "\t" "\n" \
+        > $1) \
+    | cut -f 5-8 \
+    | tr "\t" "\n" \
+    > $2
+else
+    echo "$usage"
+    exit 1
+fi
