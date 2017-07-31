@@ -16,9 +16,16 @@ zcat file.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.gz)
 [**`interleave`**](interleave): interleaving FASTQ data
 
 ```bash
-interleave [-h] <in1> <in2>"
+interleave [-h] <in1> <in2>
 ---
 interleave file_1.fq file_2.fq > file.fq
-interleave <(zcat file_1.fq.gz) >(zcat file_2.fq.gz) | pigz > file.fq.gz
+interleave <(zcat file_1.fq.gz) <(zcat file_2.fq.gz) | pigz > file.fq.gz
 ```
 
+[**`subsample`**](subsample): subsampling of streamed FASTQ data
+
+```bash
+subsample [-h] <proportion>
+---
+cat file.fq | subsample 0.25 > file2.fq
+```

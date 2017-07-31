@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+version="GY170731"
+usage="\
+subsample ($version): subsampling of streamed FASTQ data
+subsample [-h] <proportion>"
+
+while getopts :h option; do
+    case "$option" in
+        h)
+            echo "$usage"
+            exit
+            ;;
+        \?)
+            echo "$usage"
+            exit 1
+            ;;
+    esac
+done
+
+if (( $# == 1 )) ; then
+    paste - - - - \
+    | awk "BEGIN {srand()} rand() < $1" \
+    | tr "\t" "\n"
+else
+    echo "$usage"
+    exit 1
+fi
