@@ -1,3 +1,2 @@
-# pedestal
+# *pedestal*: A solid base for terminal bioinformatics
 
-Pedestal: A solid base for terminal bioinformatics
