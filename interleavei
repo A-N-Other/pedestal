@@ -2,7 +2,7 @@
 
 # GY170801
 
-''' linearise: FASTA <-> TSV conversion '''
+''' interleavei: intelligent FASTA/Q interleaving '''
 
 
 from __future__ import print_function  # Py2
@@ -10,7 +10,12 @@ from argparse import ArgumentParser, FileType, SUPPRESS
 from collections import namedtuple
 from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdin
+from sys import stdin, stderr
+
+try:
+    from itertools import zip_longest as zl
+except:
+    from itertools import izip_longest as zl  # Py2
 
 
 # Globals #####################################################################
@@ -92,30 +97,71 @@ def printread(record):
 if __name__ == '__main__':
 
     parser = ArgumentParser(
-        description='FASTA/Q <-> TSV conversion',
-        epilog='Converts to and from a standardised 3 column \
-        (ID \\t Seq \\t Qual) format. Linearised FASTA data will have no \
-        entry in the third column and both two-column data and data where the \
-        third column is empty will be re-interpreted as FASTA with `-v`.',
+        description='intelligent FASTA/Q interleaving',
         argument_default=SUPPRESS)
     parser.add_argument(
-        'input', nargs='*', type=FileType('r'), default=[stdin],
-        help='Input file(s) (use "-" or leave blank for stdin)')
+        '-u', dest='unpaired', nargs='?', type=FileType('r'), const=[stdin],
+        help='Unpaired input file (use "-" or leave blank for stdin)')
     parser.add_argument(
-        '-v', '--inverse', action='store_true',
-        help='Convert delimited lines back to FASTA/Q')
+        '-1', dest='firstread', nargs='*', type=FileType('r'),
+        help='First read file(s)')
+    parser.add_argument(
+        '-2', dest='secondread', nargs='*', type=FileType('r'),
+        help='Second read file(s)')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80,
         help='Wrap lines at `w` when outputting FASTA (default %(const)s)')
     args = parser.parse_args()
 
-    if 'inverse' not in args:
-        for f in args.input:
-            with MultiReader(f) as F:
-                for record in F:
-                    print('\t'.join(record))
+    # -u and or both of -1 and -2 are expected
+    # if nothing is provided, assume -u and read stdin
+    if any(k in args for k in ('firstread', 'secondread')):
 
-    else:
-        for f in args.input:
-            for l in f:
-                printread(l.strip('\r\n').split('\t'))
+        if not all(k in args for k in ('firstread', 'secondread')):
+            parser.error('Both `-1` and `-2` must be set together')
+
+        for f1, f2 in zip(args.firstread, args.secondread):
+            brokenpairs = {}
+            with MultiReader(f1) as F1, MultiReader(f2) as F2:
+                for read1, read2 in zl(F1, F2, fillvalue=None):
+                    if read1:
+                        r1id = read1.seqid.partition(' ')[0]
+                    if read2:
+                        r2id = read2.seqid.partition(' ')[0]
+                    if read1 and read2 and r1id == r2id:
+                        printread(read1)
+                        printread(read2)
+                    else:
+                        if read1:
+                            if r1id in brokenpairs:
+                                printread(read1)
+                                printread(brokenpairs.pop(r1id))
+                            else:
+                                brokenpairs[r1id] = read1
+                        if read2:
+                            if r2id in brokenpairs:
+                                printread(read2)
+                                printread(brokenpairs.pop(r2id))
+                            else:
+                                brokenpairs[r2id] = read2
+            if brokenpairs:
+                print('Dropped {} reads from {} and {}'.format(
+                    len(brokenpairs), f1.name, f2.name), file=stderr)
+
+    elif 'unpaired' not in args:
+        args.unpaired = [stdin]
+
+    if 'unpaired' in args:
+        for f in args.unpaired:
+            brokenpairs = {}
+            with MultiReader(f) as F:
+                for read in F:
+                    rid = read.seqid.partition(' ')[0]
+                    if rid in brokenpairs:
+                        printread(read)
+                        printread(brokenpairs.pop(rid))
+                    else:
+                        brokenpairs[rid] = read
+            if brokenpairs:
+                print('Dropped {} reads from {}'.format(
+                    len(brokenpairs), f.name), file=stderr)
