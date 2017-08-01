@@ -74,7 +74,7 @@ def grouper(iterable, k):
         yield iterable[i*k:i*k+k]
 
 
-def printread(record):
+def printseq(record):
     ''' Appropraitely prints a seqrecord or equivalent 2 or 3-item iterable '''
     if len(record) == 3 and record[2]:
         print('@{}\n{}\n+\n{}'.format(*record))
@@ -118,4 +118,4 @@ if __name__ == '__main__':
     else:
         for f in args.input:
             for l in f:
-                printread(l.strip('\r\n').split('\t'))
+                printseq(l.strip('\r\n').split('\t'))

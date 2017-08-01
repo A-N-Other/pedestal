@@ -2,7 +2,7 @@
 
 # GY170801
 
-''' interleavei: intelligent FASTA/Q interleaving '''
+''' rc: reverse complement '''
 
 
 from __future__ import print_function  # Py2
@@ -10,18 +10,21 @@ from argparse import ArgumentParser, FileType, SUPPRESS
 from collections import namedtuple
 from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdin, stderr
-
-try:
-    from itertools import zip_longest as zl
-except:
-    from itertools import izip_longest as zl  # Py2
+from sys import stdin
 
 
 # Globals #####################################################################
 
 
 signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+
+# translation pattern for reverse-complement
+trans = ('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
+try:
+    _acgt_comp = str.maketrans(*trans)
+except AttributeError:
+    from string import maketrans  # Py2
+    _acgt_comp = maketrans(*trans)
 
 # data structures
 seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
@@ -73,6 +76,13 @@ class MultiReader(object):
 # Functions ###################################################################
 
 
+def rcomp(record):
+    ''' Reverse complement a seqrecord '''
+    return record._replace(
+        seq=record.seq[::-1].translate(_acgt_comp),
+        quals=record.quals[::-1])
+
+
 def grouper(iterable, k):
     ''' Yield a memory-mapped iterable in chunks of `k` '''
     for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
@@ -97,71 +107,18 @@ def printseq(record):
 if __name__ == '__main__':
 
     parser = ArgumentParser(
-        description='intelligent FASTA/Q interleaving',
+        description='Reverse complement',
         argument_default=SUPPRESS)
     parser.add_argument(
-        '-u', dest='unpaired', nargs='*', type=FileType('r'),
-        help='Unpaired input file(s) (use "-" or leave blank for stdin)')
-    parser.add_argument(
-        '-1', dest='firstread', nargs='*', type=FileType('r'),
-        help='First read file(s)')
-    parser.add_argument(
-        '-2', dest='secondread', nargs='*', type=FileType('r'),
-        help='Second read file(s)')
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='Input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80,
         help='Wrap lines at `w` when outputting FASTA (default %(const)s)')
+
     args = parser.parse_args()
 
-    # -u and or both of -1 and -2 are expected
-    # if nothing is provided, assume -u and read stdin
-    if any(k in args for k in ('firstread', 'secondread')):
-
-        if not all(k in args for k in ('firstread', 'secondread')):
-            parser.error('Both `-1` and `-2` must be set together')
-
-        for f1, f2 in zip(args.firstread, args.secondread):
-            brokenpairs = {}
-            with MultiReader(f1) as F1, MultiReader(f2) as F2:
-                for read1, read2 in zl(F1, F2, fillvalue=None):
-                    if read1:
-                        r1id = read1.seqid.split(' ')[0]
-                    if read2:
-                        r2id = read2.seqid.split(' ')[0]
-                    if read1 and read2 and r1id == r2id:
-                        printseq(read1)
-                        printseq(read2)
-                    else:
-                        if read1:
-                            if r1id in brokenpairs:
-                                printseq(read1)
-                                printseq(brokenpairs.pop(r1id))
-                            else:
-                                brokenpairs[r1id] = read1
-                        if read2:
-                            if r2id in brokenpairs:
-                                printseq(read2)
-                                printseq(brokenpairs.pop(r2id))
-                            else:
-                                brokenpairs[r2id] = read2
-            if brokenpairs:
-                print('Dropped {} reads from {} and {}'.format(
-                    len(brokenpairs), f1.name, f2.name), file=stderr)
-
-    elif 'unpaired' not in args:
-        args.unpaired = [stdin]
-
-    if 'unpaired' in args:
-        for f in args.unpaired:
-            brokenpairs = {}
-            with MultiReader(f) as F:
-                for read in F:
-                    rid = read.seqid.split(' ')[0]
-                    if rid in brokenpairs:
-                        printseq(read)
-                        printseq(brokenpairs.pop(rid))
-                    else:
-                        brokenpairs[rid] = read
-            if brokenpairs:
-                print('Dropped {} reads from {}'.format(
-                    len(brokenpairs), f.name), file=stderr)
+    for f in args.input:
+        with MultiReader(f) as F:
+            for record in F:
+                printseq(rcomp(record))

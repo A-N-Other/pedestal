@@ -22,7 +22,7 @@ from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 # translation pattern for reverse-complement
-trans = ('ATUCGXNRYWSKMDVHB', 'TAAGXXNYRWSMKHBDV')
+trans = ('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
 try:
     _acgt_comp = str.maketrans(*trans)
 except AttributeError:
@@ -88,7 +88,7 @@ def iterkmers(iterable, k, step=1):
 
 def rcomp(record):
     ''' Reverse complement a seqrecord '''
-    return seqrecord._replace(
+    return record._replace(
         seq=record.seq[::-1].translate(_acgt_comp),
         quals=record.quals[::-1])
 
