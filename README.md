@@ -22,19 +22,19 @@ interleave file_1.fq file_2.fq > file.fq
 interleave <(zcat file_1.fq.gz) <(zcat file_2.fq.gz) | pigz > file.fq.gz
 ```
 
+[**`linearise`**](linearise): FASTA/Q <-> TSV conversion
+
+```bash
+linearise [-h] [-v] [-w [WRAP]] [input [input ...]]
+--- usage examples ----
+linearise file.fq | grep -wF "test" | linearise -v > test.fq
+cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
+```
+
 [**`subsample`**](subsample): subsampling of streamed FASTQ data
 
 ```bash
 subsample [-h] <proportion>
 --- usage examples ----
 cat file.fq | subsample 0.25 > file2.fq
-```
-
-[**`linearise`**](linearise): FASTA/Q <-> TSV conversion
-
-```bash
-linearise [-h] [-v] [input [input ...]]
---- usage examples ----
-linearise file.fq | grep -wF "test" | linearise -v > test.fq
-cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 ```

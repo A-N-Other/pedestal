@@ -5,16 +5,24 @@
 ''' linearise: FASTA <-> TSV conversion '''
 
 
-from __future__ import print_function  # Py2 compatibility
-
-import socket
-import errno
-from argparse import ArgumentParser, FileType
+from __future__ import print_function  # Py2
+from argparse import ArgumentParser, FileType, SUPPRESS
 from sys import stdin
+from math import ceil
+from signal import signal, SIGPIPE, SIG_DFL
+
+
+# Globals #####################################################################
+
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+
+
+# Classes #####################################################################
 
 
 class MultiReader(object):
-    ''' A class for reading FASTA/Q records'''
+    ''' A class for reading FASTA/Q records '''
 
     def __init__(self, inputstream):
         self._fileobj = inputstream
@@ -53,6 +61,18 @@ class MultiReader(object):
     next = __next__  # Py2 compatibility
 
 
+# Functions ###################################################################
+
+
+def grouper(iterable, k):
+    ''' Yield a memory-mapped iterable in chunks of `k` '''
+    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+        yield iterable[i*k:i*k+k]
+
+
+###############################################################################
+
+
 if __name__ == '__main__':
 
     parser = ArgumentParser(
@@ -60,35 +80,36 @@ if __name__ == '__main__':
         epilog='Converts to and from a standardised 3 column \
         (ID \\t Seq \\t Qual) format. Linearised FASTA data will have no \
         entry in the third column and both two-column data and data where the \
-        third column is empty will be re-interpreted as FASTA with `-v`.')
+        third column is empty will be re-interpreted as FASTA with `-v`.',
+        argument_default=SUPPRESS)
     parser.add_argument(
         'input', nargs='*', type=FileType('r'), default=[stdin],
         help='Input file (use "-" or leave blank for stdin)')
     parser.add_argument(
         '-v', '--inverse', action='store_true',
         help='Convert delimited lines back to FASTA/Q')
+    parser.add_argument(
+        '-w', '--wrap', nargs='?', type=int, const=80,
+        help='Wrap lines at `w` when outputting FASTA (default %(const)s)')
     args = parser.parse_args()
 
-    try:
+    if 'inverse' not in args:
 
-        if not args.inverse:
+        for f in args.input:
+            with MultiReader(f) as F:
+                for record in F:
+                    print('\t'.join(record))
 
-            for f in args.input:
-                with MultiReader(f) as F:
-                    for record in F:
-                        print('\t'.join(record))
+    else:
 
-        else:
-
-            for f in args.input:
-                for l in f:
-                    l = l.strip().split('\t')
-                    if len(l) == 3:
-                        print('@{}\n{}\n+\n{}'.format(*l))
-                    else:
-                        print('>{}\n{}'.format(*l))
-
-    except socket.error as e:
-        # Silence errors from closed PIPEs, but die nastily for other errors
-        if e.errno == errno.EPIPE:
-            pass
+        for f in args.input:
+            for l in f:
+                l = l.strip().split('\t')
+                if len(l) == 3:
+                    print('@{}\n{}\n+\n{}'.format(*l))
+                elif 'wrap' not in args:
+                    print('>{}\n{}'.format(*l))
+                else:
+                    print('>{}'.format(l[0]))
+                    for chunk in grouper(l[1], args.wrap):
+                        print(chunk)
