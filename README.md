@@ -1,6 +1,6 @@
 # *pedestal*: A solid base for terminal bioinformatics
 
-A collection of bash wrappers and Python scripts that facilitate working in the terminal with a sequence-based data.
+A collection of bash wrappers and Python scripts that facilitate working in the terminal with sequence-based data.
 
 ---
 
