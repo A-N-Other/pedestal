@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+
+# GY170801
+
+''' linearise: FASTA <-> TSV conversion '''
+
+
+from __future__ import print_function  # Py2 compatibility
+
+import socket
+import errno
+from argparse import ArgumentParser, FileType
+from sys import stdin
+
+
+class MultiReader(object):
+    ''' A class for reading FASTA/Q records'''
+
+    def __init__(self, inputstream):
+        self._fileobj = inputstream
+        self._buffer = ' '
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        pass
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while self._buffer and self._buffer[0] not in ('>', '@'):
+            self._buffer = self._fileobj.readline()
+        if not self._buffer:
+            raise StopIteration
+        if self._buffer[0] == ">":
+            seqid = self._buffer[0:].strip()
+            self._buffer = self._fileobj.readline()
+            seqlines = []
+            while self._buffer and self._buffer[0] not in ('>', '@'):
+                seqlines.append(self._buffer.strip())
+                self._buffer = self._fileobj.readline()
+            return seqid.lstrip('>'), ''.join(seqlines).upper(), ''
+        else:
+            seqid = self._buffer[0:].strip()
+            seq = self._fileobj.readline().strip().upper()
+            self._fileobj.readline()
+            quals = self._fileobj.readline().strip()
+            self._buffer = self._fileobj.readline()
+            return seqid.lstrip('@'), seq, quals
+
+    next = __next__  # Py2 compatibility
+
+
+if __name__ == '__main__':
+
+    parser = ArgumentParser(
+        description='FASTA/Q <-> TSV conversion',
+        epilog='Converts to and from a standardised 3 column \
+        (ID \\t Seq \\t Qual) format. Linearised FASTA data will have no \
+        entry in the third column and both two-column data and data where the \
+        third column is empty will be re-interpreted as FASTA with `-v`.')
+    parser.add_argument(
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='Input file (use "-" or leave blank for stdin)')
+    parser.add_argument(
+        '-v', '--inverse', action='store_true',
+        help='Convert delimited lines back to FASTA/Q')
+    args = parser.parse_args()
+
+    try:
+
+        if not args.inverse:
+
+            for f in args.input:
+                with MultiReader(f) as F:
+                    for record in F:
+                        print('\t'.join(record))
+
+        else:
+
+            for f in args.input:
+                for l in f:
+                    l = l.strip().split('\t')
+                    if len(l) == 3:
+                        print('@{}\n{}\n+\n{}'.format(*l))
+                    else:
+                        print('>{}\n{}'.format(*l))
+
+    except socket.error as e:
+        # Silence errors from closed PIPEs, but die nastily for other errors
+        if e.errno == errno.EPIPE:
+            pass
