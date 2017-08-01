@@ -126,7 +126,6 @@ if __name__ == '__main__':
         for f in args.input:
             with MultiReader(f) as F:
                 for record in F:
-
                     n = sanitise(record.seqid.split(' ')[0])
                     n = path.join(args.dir, args.prefix + n + \
                         '.fq' if record.quals else '.fa')
