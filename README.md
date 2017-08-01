@@ -12,6 +12,14 @@ cat interleaved.fq | deinterleave file_1.fq file_2.fq
 zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.gz)
 ```
 
+[**`explode`**](explode): split FASTA/Q records to new files
+```bash
+explode [-h] [-c [CHUNKS]] [-w [WRAP]] [--dir [DIR]] [--prefix [PREFIX]] [input ...]
+--- usage examples ----
+cat file.fa | explode --dir splitfiles
+explode *.fq -c 50 --dir splitfiles --prefix chunk_
+```
+
 [**`interleave`**](interleave): interleaving FASTQ data
 ```bash
 interleave [-h] in1 in2
@@ -48,7 +56,7 @@ orf_scanner file.fa file2.fq -m ensembl_cds.fa --gff3 > cds.gff3
 ```bash
 rc [-h] [-w [WRAP]] [input ...]
 --- usage examples ----
-rc file.fa > file.rc.fa
+rc file.fa -w 80 > file.rc.fa
 zcat file.fq.gz | rc | pigz > file.rc.fq.gz
 ```
 

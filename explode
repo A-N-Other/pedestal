@@ -2,20 +2,18 @@
 
 # GY170801
 
-''' interleavei: intelligent FASTA/Q interleaving '''
+''' explode: split FASTA/Q records to new files '''
 
 
 from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
 from collections import namedtuple
+from itertools import cycle
 from math import ceil
+from os import path
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdin, stderr, stdout
-
-try:
-    from itertools import zip_longest as zl
-except:
-    from itertools import izip_longest as zl  # Py2
+from string import ascii_letters, digits  # Py2
+from sys import stdin, stdout
 
 
 # Globals #####################################################################
@@ -25,6 +23,8 @@ signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 # data structures
 seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
+
+filenamechars = "-_" + ascii_letters + digits
 
 
 # Classes #####################################################################
@@ -91,77 +91,55 @@ def printseq(record, fileobj=stdout):
             print(chunk, file=fileobj)
 
 
+def sanitise(basename, sub='_'):
+    ''' Substitute nasty characters in file names '''
+    return ''.join(c if c in filenamechars else sub for c in basename)
+
+
 ###############################################################################
 
 
 if __name__ == '__main__':
 
     parser = ArgumentParser(
-        description='intelligent FASTA/Q interleaving',
+        description='Split FASTA/Q records to new files',
         argument_default=SUPPRESS)
     parser.add_argument(
-        '-u', dest='unpaired', nargs='*', type=FileType('r'),
-        help='Unpaired input file(s) (use "-" or leave blank for stdin)')
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='Input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
-        '-1', dest='firstread', nargs='*', type=FileType('r'),
-        help='First read file(s)')
-    parser.add_argument(
-        '-2', dest='secondread', nargs='*', type=FileType('r'),
-        help='Second read file(s)')
+        '-c', '--chunks', nargs='?', type=int,
+        help='Split the file into `c` chunks')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80,
         help='Wrap lines at `w` when outputting FASTA (default %(const)s)')
+    parser.add_argument(
+        '--dir', nargs='?', default='',
+        help='Output to an existing directory, `dir`')
+    parser.add_argument(
+        '--prefix', nargs='?', default='',
+        help='Preceed seqid, or chunk number with `-c`, with `prefix`')
+
     args = parser.parse_args()
 
-    # -u and or both of -1 and -2 are expected
-    # if nothing is provided, assume -u and read stdin
-    if any(k in args for k in ('firstread', 'secondread')):
-
-        if not all(k in args for k in ('firstread', 'secondread')):
-            parser.error('Both `-1` and `-2` must be set together')
-
-        for f1, f2 in zip(args.firstread, args.secondread):
-            brokenpairs = {}
-            with MultiReader(f1) as F1, MultiReader(f2) as F2:
-                for read1, read2 in zl(F1, F2, fillvalue=None):
-                    if read1:
-                        r1id = read1.seqid.split(' ')[0]
-                    if read2:
-                        r2id = read2.seqid.split(' ')[0]
-                    if read1 and read2 and r1id == r2id:
-                        printseq(read1)
-                        printseq(read2)
-                    else:
-                        if read1:
-                            if r1id in brokenpairs:
-                                printseq(read1)
-                                printseq(brokenpairs.pop(r1id))
-                            else:
-                                brokenpairs[r1id] = read1
-                        if read2:
-                            if r2id in brokenpairs:
-                                printseq(read2)
-                                printseq(brokenpairs.pop(r2id))
-                            else:
-                                brokenpairs[r2id] = read2
-            if brokenpairs:
-                print('Dropped {} reads from {} and {}'.format(
-                    len(brokenpairs), f1.name, f2.name), file=stderr)
-
-    elif 'unpaired' not in args:
-        args.unpaired = [stdin]
-
-    if 'unpaired' in args:
-        for f in args.unpaired:
-            brokenpairs = {}
+    if 'chunks' not in args:
+        for f in args.input:
             with MultiReader(f) as F:
-                for read in F:
-                    rid = read.seqid.split(' ')[0]
-                    if rid in brokenpairs:
-                        printseq(read)
-                        printseq(brokenpairs.pop(rid))
-                    else:
-                        brokenpairs[rid] = read
-            if brokenpairs:
-                print('Dropped {} reads from {}'.format(
-                    len(brokenpairs), f.name), file=stderr)
+                for record in F:
+
+                    n = sanitise(record.seqid.split(' ')[0])
+                    n = path.join(args.dir, args.prefix + n + \
+                        '.fq' if record.quals else '.fa')
+                    with open(n, 'w') as outfile:
+                        printseq(record, outfile)
+
+    else:
+        outfs = [open(path.join(args.dir, args.prefix + '{}'.format(i)), 'w')
+            for i in range(1, args.chunks + 1)]
+        outfsloop = cycle(outfs)
+        for f in args.input:
+            with MultiReader(f) as F:
+                for record in F:
+                    printseq(record, next(outfsloop))
+        for f in outfs:
+            f.close()

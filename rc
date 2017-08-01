@@ -10,7 +10,7 @@ from argparse import ArgumentParser, FileType, SUPPRESS
 from collections import namedtuple
 from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdin
+from sys import stdin, stdout
 
 
 # Globals #####################################################################
@@ -19,12 +19,11 @@ from sys import stdin
 signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 # translation pattern for reverse-complement
-trans = ('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
 try:
-    _acgt_comp = str.maketrans(*trans)
-except AttributeError:
+    _acgt_comp = str.maketrans('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
+except:
     from string import maketrans  # Py2
-    _acgt_comp = maketrans(*trans)
+    _acgt_comp = maketrans('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
 
 # data structures
 seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
@@ -89,16 +88,16 @@ def grouper(iterable, k):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(record):
+def printseq(record, fileobj=stdout):
     ''' Appropraitely prints a seqrecord or equivalent 2 or 3-item iterable '''
     if len(record) == 3 and record[2]:
-        print('@{}\n{}\n+\n{}'.format(*record))
+        print('@{}\n{}\n+\n{}'.format(*record), file=fileobj)
     elif 'wrap' not in args:
-        print('>{}\n{}'.format(record[0], record[1]))
+        print('>{}\n{}'.format(record[0], record[1]), file=fileobj)
     else:
-        print('>{}'.format(record[0]))
+        print('>{}'.format(record[0]), file=fileobj)
         for chunk in grouper(record[1], args.wrap):
-            print(chunk)
+            print(chunk, file=fileobj)
 
 
 ###############################################################################
