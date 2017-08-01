@@ -40,6 +40,16 @@ linearise file.fq | grep -wF "test" | linearise -v > test.fq
 cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 ```
 
+[**`orf_scanner`**](orf_scanner): robust CDS prediction
+
+```bash
+orf_scanner [-h] [-m [MODEL ...]] [-l [MIN_LENGTH]] [-s] [--gff3] [-v] input [input ...]
+--- usage examples ----
+orf_scanner file.fa -l 100 > file.cds.fa
+orf_scanner file.fa file2.fq -m ensembl_cds.fa --gff3 > cds.gff3
+```
+
+
 [**`subsample`**](subsample): subsampling of streamed FASTQ data
 
 ```bash

@@ -100,8 +100,8 @@ if __name__ == '__main__':
         description='intelligent FASTA/Q interleaving',
         argument_default=SUPPRESS)
     parser.add_argument(
-        '-u', dest='unpaired', nargs='?', type=FileType('r'), const=[stdin],
-        help='Unpaired input file (use "-" or leave blank for stdin)')
+        '-u', dest='unpaired', nargs='*', type=FileType('r'),
+        help='Unpaired input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
         '-1', dest='firstread', nargs='*', type=FileType('r'),
         help='First read file(s)')
@@ -125,9 +125,9 @@ if __name__ == '__main__':
             with MultiReader(f1) as F1, MultiReader(f2) as F2:
                 for read1, read2 in zl(F1, F2, fillvalue=None):
                     if read1:
-                        r1id = read1.seqid.partition(' ')[0]
+                        r1id = read1.seqid.split(' ')[0]
                     if read2:
-                        r2id = read2.seqid.partition(' ')[0]
+                        r2id = read2.seqid.split(' ')[0]
                     if read1 and read2 and r1id == r2id:
                         printread(read1)
                         printread(read2)
@@ -156,7 +156,7 @@ if __name__ == '__main__':
             brokenpairs = {}
             with MultiReader(f) as F:
                 for read in F:
-                    rid = read.seqid.partition(' ')[0]
+                    rid = read.seqid.split(' ')[0]
                     if rid in brokenpairs:
                         printread(read)
                         printread(brokenpairs.pop(rid))
