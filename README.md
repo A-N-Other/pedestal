@@ -20,6 +20,33 @@ cat file.fa | explode --dir splitfiles
 explode *.fq -c 50 --dir splitfiles --prefix chunk_
 ```
 
+[**`graph`**](graph): split FASTA/Q records to new files
+```bash
+graph [-h] [--xy [XY]] [--col COL] [--delim DELIM] [--perc] [--header [HEADER]] [--xmin XMIN] [--xmax XMAX] [--ymin YMIN] [--ymax YMAX] [--area AREA] [input ...]
+--- usage examples ---
+linearise file.fa | awk '{print length($2)}' | graph
+
+ 9.56               █
+    9
+ 8.44
+ 7.87
+ 7.31
+ 6.75
+ 6.19             █
+ 5.62
+ 5.06
+  4.5                █ █
+ 3.94                           █
+ 3.37                    █   █
+ 2.81                         █     █
+ 2.25                      █         █ █        ██
+ 1.69            █    █   █       █      █
+ 1.12              █               █  █ █  █ ██   █    ██     █
+0.562                   █        █        █         ██   ██ ██ █ ██ █   █ ██
+    0 ███████████           █  █            █  █   █  █    █    █  █ ███ █  ████
+      0         16.9      33.8      50.7      67.6      84.5      101
+```
+
 [**`interleave`**](interleave): interleaving FASTQ data
 ```bash
 interleave [-h] in1 in2

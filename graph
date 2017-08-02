@@ -1,0 +1,171 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# GY170802
+
+''' graph: basic plotting in the terminal '''
+
+
+from __future__ import print_function  # Py2
+from argparse import ArgumentParser, FileType, SUPPRESS
+from bisect import bisect_left
+from collections import defaultdict as dd
+from signal import signal, SIGPIPE, SIG_DFL
+from sys import stdin
+
+
+# Globals #####################################################################
+
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+
+
+# Functions ###################################################################
+
+
+def charlookup(i, j):
+    ''' Return character representing i/j '''
+    if i <= 0:
+        return ' '
+    if i / j <= 0.25:
+        return '░'
+    if i / j <= 0.5:
+        return '▒'
+    if i / j <= 0.75:
+        return '▓'
+    return '█'
+
+
+def plot(x_vals, y_vals):
+    ''' ASCII-art plotting '''
+
+    n_cols, n_rows = eval(args.area)
+    n_cols -= 6  # {0:5.3g} number formatting with 1 trailing space
+    n_rows -= 2  # single line to display x axis values
+
+    x_min, x_max = args.xmin, x_vals[-1]
+    x_bin_width = (x_max - x_min) / n_cols
+    x_bins = [x_min + i * x_bin_width for i in range(1, n_cols + 2)]
+
+    if 'xy' not in args:
+        cols = [0 for i in x_bins]
+        for x, y in zip(x_vals, y_vals):
+            cols[bisect_left(x_bins, x)] += y
+        cols = cols[:-1]
+        y_min, y_max = args.ymin, max(cols)
+        y_bin_width = (y_max - y_min) / n_rows
+        y_bins = [y_min + i * y_bin_width for i in range(1, n_rows + 2)]
+        for i, y_val in enumerate(cols):
+            chars = [' ' for _ in y_bins]
+            chars[bisect_left(y_bins, y_val)] = '█'
+            cols[i] = chars[:-1][::-1]
+
+    else:
+        cols = [[] for i in range(len(x_bins))]
+        for x, y in zip(x_vals, y_vals):
+            cols[bisect_left(x_bins, x)].append(y)
+        cols = cols[:-1]
+        y_min, y_max = args.ymin, max(max(c) if c else 0 for c in cols)
+        y_bin_width = (y_max - y_min) / n_rows
+        y_bins = [y_min + i * y_bin_width for i in range(1, n_rows + 2)]
+        for i, y_vals in enumerate(cols):
+            chars = [0 for _ in y_bins]
+            for y_val in y_vals:
+                chars[bisect_left(y_bins, y_val)] += 1
+            chars = chars[:-1]
+            chars = [charlookup(float(c), sum(chars)) for c in chars]
+            cols[i] = chars[::-1]
+
+    for i, y_bin in enumerate(y_bins[-2::-1]):
+        y_bin -= y_bin_width
+        print('{0:5.3g}'.format(y_bin), ''.join(col[i] for col in cols))
+
+    x_axis_labs = [x_bin - x_bin_width for x_bin in x_bins[:-2:10]]
+    lab_string = ''
+    for lab in x_axis_labs:
+        if len(lab_string) + 10 <= n_cols:
+            lab_string += '{0:<10.3g}'.format(lab)
+    print('      ' + lab_string)
+
+
+###############################################################################
+
+
+if __name__ == "__main__":
+
+    parser = ArgumentParser(
+        description='Basic plotting in the terminal',
+        argument_default=SUPPRESS)
+    parser.add_argument(
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='Input file(s) (use "-" or leave blank for stdin)')
+    parser.add_argument(
+        '--xy', nargs='?', type=str, const="1,2",
+        help='Form a scatterplot using these (comma-separated) columns \
+        (default "%(const)s" when supplied alone)')
+    parser.add_argument(
+        '--col', type=int, default=1,
+        help='Form a histogram with column `col` (default %(default)s)')
+    parser.add_argument(
+        '--delim', type=str, default="\t",
+        help='Column delimiter (default TAB)')
+    parser.add_argument(
+        '--perc', action="store_true",
+        help='Express histogram y values as percentages')
+    parser.add_argument(
+        '--header', nargs='?', type=int, const=1,
+        help='Skip `header` rows in each file (default %(const)s when \
+        supplied alone)')
+    parser.add_argument(
+        '--xmin', type=float, default=0.0,
+        help='X axis lower limit (x > `xmin`) (default %(default)s)')
+    parser.add_argument(
+        '--xmax', type=float, default=float('inf'),
+        help='X axis upper limit (x <= `xmax`) (default %(default)s)')
+    parser.add_argument(
+        '--ymin', type=float, default=0.0,
+        help='Y axis lower limit (y > `ymin`) (default %(default)s)')
+    parser.add_argument(
+        '--ymax', type=float, default=float('inf'),
+        help='Y axis upper limit (y <= `ymax`) (default %(default)s)')
+    parser.add_argument(
+        '--area', type=str, default='80,20',
+        help='Size of the graph to display as "rows,cols" \
+        (default "%(default)s")')
+    args = parser.parse_args()
+
+    if 'xy' in args:
+        data = []
+        xcol, ycol = eval(args.xy)
+        xcol, ycol = xcol - 1, ycol - 1
+    else:
+        data = dd(int)
+        args.col = args.col - 1
+
+    for f in args.input:
+        for i in range(args.header if 'header' in args else 0):
+            f.readline()
+        for l in f:
+            l = l.rstrip('\r\n')
+            if not l:
+                continue
+            l = l.split(args.delim)
+            try:
+                if 'xy' in args:
+                    x, y = float(l[xcol]), float(l[ycol])
+                    if args.xmin < x <= args.xmax and \
+                            args.ymin < y <= args.ymax:
+                        data.append((x, y))
+                else:
+                    x = float(l[args.col])
+                    if args.xmin < x <= args.xmax:
+                        data[x] += 1
+            except ValueError:
+                pass
+
+    if 'xy' not in args:
+        data = data.items()
+        if 'perc' in args:
+            y_sum = sum(y for x, y in data)
+            data = [(x, float(y) / y_sum * 100) for x, y in data]
+    plot(*zip(*sorted(data)))

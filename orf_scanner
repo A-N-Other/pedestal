@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170801
+# GY170802
 
 ''' orf_scanner: robust CDS prediction '''
 
@@ -160,7 +160,8 @@ if __name__ == '__main__':
         the longest 1000 ORFs from the `input` are used)')
     parser.add_argument(
         '-l', '--min_length', const='300', nargs='?', type=int,
-        help='Minimum nucleotide length of ORFs (default %(const)s)')
+        help='Minimum nucleotide length of ORFs (default %(const)s when \
+        supplied alone)')
     parser.add_argument(
         '-s', '--stranded', action='store_true',
         help='Consider only ORFs from sense frames')

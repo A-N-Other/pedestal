@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170801
+# GY170802
 
 ''' rc: reverse complement '''
 
@@ -113,7 +113,8 @@ if __name__ == '__main__':
         help='Input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s)')
+        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        supplied alone)')
 
     args = parser.parse_args()
 
