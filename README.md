@@ -20,7 +20,7 @@ cat file.fa | explode --dir splitfiles
 explode *.fq -c 50 --dir splitfiles --prefix chunk_
 ```
 
-[**`graph`**](graph): split FASTA/Q records to new files
+[**`graph`**](graph): basic plotting in the terminal
 ```bash
 graph [-h] [--xy [XY]] [--col COL] [--delim DELIM] [--perc] [--header [HEADER]] [--xmin XMIN] [--xmax XMAX] [--ymin YMIN] [--ymax YMAX] [--area AREA] [input ...]
 --- usage examples ---
