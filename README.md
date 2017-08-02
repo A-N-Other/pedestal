@@ -24,7 +24,7 @@ explode *.fq -c 50 --dir splitfiles --prefix chunk_
 ```bash
 graph [-h] [--xy [XY]] [--col COL] [--delim DELIM] [--perc] [--header [HEADER]] [--xmin XMIN] [--xmax XMAX] [--ymin YMIN] [--ymax YMAX] [--area AREA] [input ...]
 --- usage examples ---
-linearise file.fa | awk '{print length($2)}' | graph
+linearise file.fa | awk '{print length($2)}' | graph --perc
 
  9.56               █
     9
