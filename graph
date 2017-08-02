@@ -10,6 +10,7 @@ from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
 from bisect import bisect_left
 from collections import defaultdict as dd
+from math import floor, log10
 from signal import signal, SIGPIPE, SIG_DFL
 from sys import stdin
 
@@ -36,11 +37,20 @@ def charlookup(i, j):
     return '█'
 
 
+def round_to(x, n):
+    ''' Round `x` to `n` significant figures '''
+    if not x:
+        return 0
+    power = -int(floor(log10(abs(x)))) + (n - 1)
+    factor = (10 ** power)
+    return round(x * factor) / factor
+
+
 def plot(x_vals, y_vals):
     ''' ASCII-art plotting '''
 
     n_cols, n_rows = eval(args.area)
-    n_cols -= 6  # {0:5.3g} number formatting with 1 trailing space
+    n_cols -= 8  # {0:5.3g} number formatting with 1 trailing space
     n_rows -= 2  # single line to display x axis values
 
     x_min, x_max = args.xmin, x_vals[-1]
@@ -78,14 +88,15 @@ def plot(x_vals, y_vals):
 
     for i, y_bin in enumerate(y_bins[-2::-1]):
         y_bin -= y_bin_width
-        print('{0:5.3g}'.format(y_bin), ''.join(col[i] for col in cols))
+        print('{0:7.3g}'.format(round_to(y_bin, 2)),
+            ''.join(col[i] for col in cols))
 
     x_axis_labs = [x_bin - x_bin_width for x_bin in x_bins[:-2:10]]
     lab_string = ''
     for lab in x_axis_labs:
         if len(lab_string) + 10 <= n_cols:
             lab_string += '{0:<10.3g}'.format(lab)
-    print('      ' + lab_string)
+    print(' '*8 + lab_string)
 
 
 ###############################################################################
