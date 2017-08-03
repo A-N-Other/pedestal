@@ -11,7 +11,9 @@ from argparse import ArgumentParser, FileType, SUPPRESS
 from bisect import bisect_left
 from collections import defaultdict as dd
 from math import floor, log10
+import platform
 from signal import signal, SIGPIPE, SIG_DFL
+import struct
 from sys import stdin
 
 
@@ -46,10 +48,77 @@ def round_to(x, n):
     return round(x * factor) / factor
 
 
+def get_terminal_size():
+    ''' Return the width and height of the current unix terminal
+    Adapted from https://gist.github.com/jtriley/1108174 '''
+
+    def _linux():
+        def ioctl_GWINSZ(fd):
+            try:
+                import fcntl
+                import termios
+                return struct.unpack('hh',
+                    fcntl.ioctl(fd, termios.TIOCGWINSZ, '1234'))
+            except:
+                pass
+        cr = ioctl_GWINSZ(0) or ioctl_GWINSZ(1) or ioctl_GWINSZ(2)
+        if not cr:
+            try:
+                import os
+                fd = os.open(os.ctermid(), os.O_RDONLY)
+                cr = ioctl_GWINSZ(fd)
+                os.close(fd)
+            except:
+                pass
+        if not cr:
+            try:
+                cr = (os.environ['LINES'], os.environ['COLUMNS'])
+            except:
+                return None
+        return int(cr[1]), int(cr[0])
+
+    def _windows():
+        try:
+            from ctypes import windll, create_string_buffer
+            h = windll.kernel32.GetStdHandle(-12)  # -12 == stderr
+            csbi = create_string_buffer(22)
+            res = windll.kernel32.GetConsoleScreenBufferInfo(h, csbi)
+            if res:
+                (bufx, bufy, curx, cury, wattr,
+                    left, top, right, bottom,
+                    maxx, maxy) = struct.unpack("hhhhHhhhhhh", csbi.raw)
+                sizex = right - left + 1
+                sizey = bottom - top + 1
+                return sizex, sizey
+        except:
+            return None
+
+    def _tput():
+        try:
+            import subprocess
+            import shlex
+            cols = int(subprocess.check_call(shlex.split('tput cols')))
+            rows = int(subprocess.check_call(shlex.split('tput lines')))
+            return cols, rows
+        except:
+            return None
+
+    if platform.system() == 'Windows':
+        area = _windows()
+        if area is None:
+            area = _tput()
+    elif platform.system() in ['Linux', 'Darwin'] \
+            or platform.system().startswith('CYGWIN'):
+        area = _linux()
+    if area:
+        return area
+    return 80, 20  # default value
+
+
 def plot(x_vals, y_vals):
     ''' ASCII-art plotting '''
 
-    n_cols, n_rows = eval(args.area)
+    n_cols, n_rows = get_terminal_size()
     n_cols -= 8  # {0:5.3g} number formatting with 1 trailing space
     n_rows -= 2  # single line to display x axis values
 
@@ -142,10 +211,6 @@ if __name__ == "__main__":
         '--ymax', type=float, default=float('inf'),
         help='Y axis upper limit, above which values are discarded \
         (default %(default)s)')
-    parser.add_argument(
-        '--area', type=str, default='80,20',
-        help='Size of the graph to display as "rows,cols" \
-        (default "%(default)s")')
     args = parser.parse_args()
 
     if 'xy' in args:
