@@ -23,7 +23,7 @@ explode *.fq -c 50 --dir splitfiles --prefix chunk_
 [**`graph`**](graph): basic plotting in the terminal
 ```bash
 graph [-h] [--xy [XY]] [--col COL] [--delim DELIM] [--perc] [--header [HEADER]]
-    [--xmin XMIN] [--xmax XMAX] [--ymin YMIN] [--ymax YMAX][--area AREA] [input ...]
+    [--xmin XMIN] [--xmax XMAX] [--ymin YMIN] [--ymax YMAX] [input ...]
 --- usage examples ---
 samtools view file.bam -f64 \
 | head -100000 \
