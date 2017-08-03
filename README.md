@@ -47,9 +47,8 @@ samtools view file.bam -f64 \
    0.79              █                              ███
    0.53                                                █████
    0.26             █                                       ████
-      0 ████████████                                            ████████████████
+      0      ███████                                            ████████████████
         0         69.4      139       208       278       347       417
-
 ```
 
 [**`interleave`**](interleave): interleaving FASTQ data
