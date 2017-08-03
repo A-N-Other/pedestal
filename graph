@@ -132,13 +132,15 @@ if __name__ == "__main__":
         help='X axis lower limit (x > `xmin`) (default %(default)s)')
     parser.add_argument(
         '--xmax', type=float, default=float('inf'),
-        help='X axis upper limit (x <= `xmax`) (default %(default)s)')
+        help='X axis upper limit, above which values are discarded \
+        (default %(default)s)')
     parser.add_argument(
         '--ymin', type=float, default=0.0,
         help='Y axis lower limit (y > `ymin`) (default %(default)s)')
     parser.add_argument(
         '--ymax', type=float, default=float('inf'),
-        help='Y axis upper limit (y <= `ymax`) (default %(default)s)')
+        help='Y axis upper limit, above which values are discarded \
+        (default %(default)s)')
     parser.add_argument(
         '--area', type=str, default='80,20',
         help='Size of the graph to display as "rows,cols" \
