@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# GY170802
+# GY170803
 
 ''' graph: basic plotting in the terminal '''
 
@@ -95,7 +95,7 @@ def plot(x_vals, y_vals):
     lab_string = ''
     for lab in x_axis_labs:
         if len(lab_string) + 10 <= n_cols:
-            lab_string += '{0:<10.3g}'.format(lab)
+            lab_string += '{0:<10.3g}'.format(round_to(lab, 3))
     print(' '*8 + lab_string)
 
 
