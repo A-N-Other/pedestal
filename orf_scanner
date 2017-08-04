@@ -89,14 +89,15 @@ class MultiReader(object):
             while self._buffer and self._buffer[0] not in ('>', '@'):
                 seqlines.append(self._buffer.strip())
                 self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, ''.join(seqlines).upper(), '')
+            return seqrecord(
+                seqid, ''.join(seqlines).upper().replace('U', 'T'), '')
         else:
             seqid = self._buffer[1:].strip()
             seq = self._fileobj.readline().strip().upper()
             self._fileobj.readline()
             quals = self._fileobj.readline().strip()
             self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, seq, quals)
+            return seqrecord(seqid, seq.replace('U', 'T'), quals)
 
     next = __next__  # Py2 compatibility
 
