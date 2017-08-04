@@ -1,0 +1,273 @@
+#!/usr/bin/env python
+
+# GY170804
+
+''' cons: intelligent consensus formation '''
+
+
+from __future__ import print_function  # Py2
+from collections import defaultdict as dd
+from argparse import ArgumentParser, FileType, SUPPRESS
+from sys import stdin
+from collections import namedtuple
+from signal import signal, SIGPIPE, SIG_DFL
+
+import numpy as np
+
+
+# Globals #####################################################################
+
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+
+# data structures
+fastarecord = namedtuple('fastarecord', ['seqid', 'seq'])
+
+iupac_codes = {
+    'AG': 'R', 'CT': 'Y', 'CG': 'S', 'AT': 'W', 'GT': 'K', 'AC': 'M',
+    'CGT': 'B', 'AGT': 'D', 'ACT': 'H', 'ACG': 'V',
+    'ACGT': 'N', '': 'N'}
+
+
+# Classes #####################################################################
+
+
+class FastaReader(object):
+    ''' A class for reading FASTA records'''
+
+    def __init__(self, inputstream):
+        self._fileobj = inputstream
+        self._buffer = self._fileobj.readline()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        pass
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while self._buffer and not self._buffer.startswith('>'):
+            self._buffer = self._fileobj.readline()
+        if not self._buffer:
+            raise StopIteration
+        seqid = self._buffer[1:].strip().split(' ')[0]
+        seqlines = []
+        self._buffer = self._fileobj.readline()
+        while self._buffer and not self._buffer.startswith('>'):
+            seqlines.append(self._buffer.strip())
+            self._buffer = self._fileobj.readline()
+        return fastarecord(seqid, ''.join(seqlines).upper())
+
+    next = __next__
+
+
+# Functions ###################################################################
+
+
+def poisson(data):
+        ''' A cost function with a poisson distribution and changing mean
+        Args:
+            data (:obj:`list` of float): 1D time series data
+        Returns:
+            function: Function with signature
+                (int, int) -> float
+                where the first arg is the starting index, and the second
+                is the last arg. Returns the cost of that segment'''
+
+        data = np.hstack(([0.0], np.array(data)))
+        cumm = np.cumsum(data)
+
+        def cost(s, t):
+            ''' Cost function
+            Args:
+                start (int): start index
+                end (int): end index
+            Returns:
+                float: Cost, from start to end'''
+
+            diff = cumm[t]-cumm[s]
+            if diff == 0:
+                return -2 * diff * (- np.log(t-s) - 1)
+            else:
+                return -2 * diff * (np.log(diff) - np.log(t-s) - 1)
+
+        return cost
+
+
+def pelt(cost, length, pen=None):
+    ''' Pure Python implementation of the PELT algorithm to compute time
+    series changepoints ... from https://github.com/ruipgil/changepy
+
+    Args:
+        cost (function): cost function, with the following signature,
+            (int, int) -> float
+            where the parameters are the start index, and the second
+            the last index of the segment to compute the cost.
+        length (int): Data size
+        pen (float, optional): defaults to log(n)
+    Returns:
+        (:obj:`list` of int): List with the indexes of changepoints '''
+
+    def find_min(arr, val=0.0):
+        ''' Finds the minimum value and index
+        Args:
+            arr (np.array)
+            val (float, optional): value to add
+        Returns:
+            (float, int): minimum value and index '''
+        return min(arr) + val, np.argmin(arr)
+
+    if pen is None:
+        pen = np.log(length)
+
+    F = np.zeros(length + 1)
+    R = np.array([0], dtype=np.int)
+    candidates = np.zeros(length + 1, dtype=np.int)
+
+    F[0] = -pen
+
+    for tstar in range(2, length + 1):
+        cpt_cands = R
+        seg_costs = np.zeros(len(cpt_cands))
+        for i in range(0, len(cpt_cands)):
+            seg_costs[i] = cost(cpt_cands[i], tstar)
+
+        F_cost = F[cpt_cands] + seg_costs
+        F[tstar], tau = find_min(F_cost, pen)
+        candidates[tstar] = cpt_cands[tau]
+
+        ineq_prune = [val < F[tstar] for val in F_cost]
+        R = [cpt_cands[j] for j, val in enumerate(ineq_prune) if val]
+        R.append(tstar - 1)
+        R = np.array(R, dtype=np.int)
+
+    last = candidates[-1]
+    changepoints = [last]
+    while last > 0:
+        last = candidates[last]
+        changepoints.append(last)
+
+    return sorted(changepoints)
+
+
+def consensus_base(base, iupac=False):
+    ''' Decide the consensus at a base position '''
+
+    try:
+        del(base['-'])
+    except KeyError:
+        pass
+    if not base:
+        return '-'  # Return gap-only
+    elif len(base) == 1:
+        return base.popitem()[0]  # Return unambiguous
+    nts = sorted([(k, v) for k, v in base.items()],
+        key=lambda x: x[1], reverse=True)
+    if not iupac:
+        nts = [nt for nt in nts if nt[1] == nts[0][1]]
+        if len(nts) == 1:
+            return nts[0][0]  # Return majority
+        return 'N'  # Return majority indecision
+    else:
+        nts = [nt for nt in nts if nt[1] >= float(nts[0][1]) / 2]
+        if len(nts) == 1:
+            return nts[0][0]  # Return majority
+        return iupac_codes[''.join(sorted([nt[0] for nt in nts if nt[0] in 'ATCG']))]  # Return iupac indecision
+
+
+if __name__ == '__main__':
+
+    parser = ArgumentParser(
+        description='cons: intelligent consensus formation',
+        argument_default=SUPPRESS)
+    parser.add_argument(
+        'input', nargs='?', type=FileType('r'), default=stdin,
+        help='Input FASTA alignment file (use "-" or leave blank for stdin)')
+    parser.add_argument(
+        '-n', '--name', required=True,
+        help='Sequence identifier for the consensus')
+    parser.add_argument(
+        '-a', '--ambig', nargs='?', const=0.5, type=float,
+        help='Use IUPAC ambiguity codes, including all bases >= `a` fold \
+        as frequent as the most frequent nucleotide at the position \
+        (default %(const)s)')
+    parser.add_argument(
+        '-m', '--min', default=2, nargs='?', type=int,
+        help='Only ever include sites >= depth `m` (default %(default)s)')
+    parser.add_argument(
+        '-g', '--glob', const=0.2, nargs='?', type=float,
+        help='The per-site required alignment depth must be >= \
+        max(`g`*totaldepth, `m`) (default %(const)s)')
+    parser.add_argument(
+        '-l', '--local', const=0.5, nargs='?', type=float,
+        help='The per-site required alignment depth is calculated in \
+        comparison to its local region, and must be >= \
+        max(`l`*localdepth, `m`) (default %(const)s). When combined with `g`, \
+        the calculated local depth must also be >= `g`*totaldepth')
+    parser.add_argument(
+        '-s', '--smooth', default=50, nargs='?', type=float,
+        help='Minimum size (nts) of local areas for use with `-l` \
+        (default %(default)s)')
+    parser.add_argument(
+        '--retaingaps', action='store_true',
+        help='Retain gap characters in consensus')
+    args = parser.parse_args()
+
+    with FastaReader(args.input) as F:
+        for i, record in enumerate(F):
+            if not i:
+                aln = [dd(int) for i in range(len(record.seq))]
+            for j, base in enumerate(record.seq):
+                aln[j][base] += 1
+
+    totaldepth = i + 1
+
+    if not 'local' in args:
+
+        depth_req = max(args.min,
+            np.ceil(args.glob * totaldepth) if 'glob' in args else 0)
+        cutoff = totaldepth - depth_req
+        cons = [consensus_base(base, args.ambig if 'ambig' in args else False)
+            if base.get('-', 0) <= cutoff else '-' for base in aln]
+
+    else:
+
+        depths = [sum(v for k, v in base.items() if k != '-') for base in aln]
+        changepoints = list(pelt(poisson(np.array(depths)), len(depths)))
+        changepoints.append(len(aln))
+
+        changes = [(changepoints[0], changepoints[1],
+            np.median(depths[changepoints[0]:changepoints[1]]))]
+        for i, c in enumerate(changepoints[1:-1], 1):
+            local_depth = np.median(depths[c:changepoints[i+1]])
+            if local_depth > changes[-1][2] * 1.1:
+                changes.append((c, changepoints[i+1], local_depth))
+            elif local_depth < changes[-1][2] * args.local and \
+                changepoints[i+1] - c < args.smooth:
+                changes[-1] = (changes[-1][0], changepoints[i+1],
+                    np.median(depths[changes[-1][0]:changepoints[i+1]]))
+            elif local_depth >= changes[-1][2] * 0.9:
+                changes[-1] = (changes[-1][0], changepoints[i+1],
+                    np.median(depths[changes[-1][0]:changepoints[i+1]]))
+            else:
+                changes.append((c, changepoints[i+1], local_depth))
+        changepoints = [c[0] for c in changes] + [len(aln)]
+
+        cons = []
+        for region in (changepoints[i:i+2] for i in range(len(changepoints)-1)):
+            local_depth = np.ceil(
+                float(sum(depths[region[0]:region[1]])) / (region[1]-region[0]))
+            if 'glob' in args and local_depth < totaldepth * args.glob:
+                cons += ['-' for base in aln[region[0]:region[1]]]
+                continue
+            depth_req = max(args.min, np.ceil(args.local * local_depth))
+            cutoff = totaldepth - depth_req
+            cons += [consensus_base(base, args.ambig if 'ambig' in args else False)
+                if base.get('-', 0) <= cutoff else '-' for base in aln[region[0]:region[1]]]
+
+    if 'retaingaps' not in args:
+        cons = [base for base in cons if base != '-']
+    print('>{}\n{}'.format(args.name, ''.join(cons)))

@@ -12,6 +12,13 @@ cat *.tsv | cuti -f1-2,5,3-4 > merged.tsv
 cuti file.csv -d, -n pvalue > pvalues
 ```
 
+[**`cons`**](cons): intelligent consensus formation
+```bash
+cons [-h] -n NAME [-a [AMBIG]] [-m [MIN]] [-g [GLOB]] [-l [LOCAL]] [-s [SMOOTH]] [--retaingaps] [input]
+--- usage examples ---
+cat aligned.fa | cons -n example -g -l > aligned.cons
+```
+
 [**`deinterleave`**](deinterleave): separation of interleaved FASTQ stream data
 ```bash
 deinterleave [-h] out1 out2
