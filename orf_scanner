@@ -31,8 +31,8 @@ except AttributeError:
 
 _aa_translate = {'TTT': 'F', 'TTC': 'F', 'TCT': 'S', 'TCC': 'S',
                  'TAT': 'Y', 'TAC': 'Y', 'TGT': 'C', 'TGC': 'C',
-                 'TTA': 'L', 'TCA': 'S', 'TAA': '.', 'TGA': '.',
-                 'TTG': 'L', 'TCG': 'S', 'TAG': '.', 'TGG': 'W',
+                 'TTA': 'L', 'TCA': 'S', 'TAA': '*', 'TGA': '*',
+                 'TTG': 'L', 'TCG': 'S', 'TAG': '*', 'TGG': 'W',
                  'CCC': 'P', 'CTT': 'L', 'CTC': 'L', 'CCT': 'P',
                  'CCC': 'P', 'CAC': 'H', 'CGC': 'R', 'CAT': 'H',
                  'CAC': 'H', 'CGT': 'R', 'CGC': 'R', 'CCA': 'P',
