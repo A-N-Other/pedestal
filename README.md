@@ -4,6 +4,14 @@ A collection of bash wrappers and Python scripts that facilitate working in the 
 
 ---
 
+[**`cuti`**](cuti): ordering and selection of columnar data
+```bash
+cuti [-h] (-n NAMES [NAMES ...] | -f FIELDS) [-d [DELIM]] [--fill [FILL]] [input ...]
+--- usage examples ---
+cat *.tsv | cuti -f1-2,5,3-4 > merged.tsv
+cuti file.csv -d, -n pvalue > pvalues
+```
+
 [**`deinterleave`**](deinterleave): separation of interleaved FASTQ stream data
 ```bash
 deinterleave [-h] out1 out2
