@@ -12,7 +12,7 @@ from sys import stdin
 from collections import namedtuple
 from signal import signal, SIGPIPE, SIG_DFL
 
-import numpy as np
+
 
 
 # Globals #####################################################################
@@ -215,6 +215,9 @@ if __name__ == '__main__':
         '--retaingaps', action='store_true',
         help='Retain gap characters in consensus')
     args = parser.parse_args()
+
+    # import here so that we can print the help without dying on import failure
+    import numpy as np
 
     with FastaReader(args.input) as F:
         for i, record in enumerate(F):
