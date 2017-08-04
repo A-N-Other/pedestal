@@ -6,7 +6,7 @@ A collection of bash wrappers and Python scripts that facilitate working in the 
 
 [**`cuti`**](cuti): ordering and selection of columnar data
 ```bash
-cuti [-h] (-n NAMES [NAMES ...] | -f FIELDS) [-d [DELIM]] [--fill [FILL]] [input ...]
+cuti [-h] (-n NAMES [NAMES ...] | -f FIELDS) [-d DELIM] [--fill FILL] [input ...]
 --- usage examples ---
 cat *.tsv | cuti -f1-2,5,3-4 > merged.tsv
 cuti file.csv -d, -n pvalue > pvalues
@@ -22,7 +22,7 @@ zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.
 
 [**`explode`**](explode): split FASTA/Q records to new files
 ```bash
-explode [-h] [-c [CHUNKS]] [-w [WRAP]] [--dir [DIR]] [--prefix [PREFIX]] [input ...]
+explode [-h] [-c CHUNKS] [-w [WRAP]] [--dir DIR] [--prefix PREFIX] [input ...]
 --- usage examples ---
 cat file.fa | explode --dir splitfiles
 explode *.fq -c 50 --dir splitfiles --prefix chunk_
@@ -85,7 +85,7 @@ cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 
 [**`orf_scanner`**](orf_scanner): robust CDS prediction
 ```bash
-orf_scanner [-h] [-m [MODEL ...]] [-l MIN_LENGTH] [-s] [-t] [--gff3] [-v] input ...
+orf_scanner [-h] [-m [MODEL ...]] [-l MIN_LENGTH] [-s] [-t] [--gff3] [--verbose] input ...
 --- usage examples ---
 orf_scanner file.fa -l 100 > file.cds.fa
 orf_scanner file.fa file2.fq -m ensembl_cds.fa --gff3 > cds.gff3

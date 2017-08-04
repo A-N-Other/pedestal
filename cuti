@@ -43,10 +43,10 @@ if __name__ == '__main__':
         help='Ordered (comma separated) list or ranges of column numbers \
         (1-based inclusive [1,n]) e.g. "1,3-4,2,5-8"')
     parser.add_argument(
-        '-d', '--delim', nargs='?', default='\t',
+        '-d', '--delim', default='\t',
         help='Column delimter (default TAB)')
     parser.add_argument(
-        '--fill', nargs='?', default='',
+        '--fill', default='',
         help='Replace blanks with `fill`')
     args = parser.parse_args()
 

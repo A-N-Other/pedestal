@@ -202,7 +202,7 @@ if __name__ == '__main__':
         '--gff3', action='store_true',
         help='Output GFF3 format instead of FASTA sequences')
     parser.add_argument(
-        '-v', '--verbose', action='store_true',
+        '--verbose', action='store_true',
         help='Minimum length of ORFs to report')
     args = parser.parse_args()
 

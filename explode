@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170802
+# GY170804
 
 ''' explode: split FASTA/Q records to new files '''
 
@@ -108,17 +108,17 @@ if __name__ == '__main__':
         'input', nargs='*', type=FileType('r'), default=[stdin],
         help='Input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
-        '-c', '--chunks', nargs='?', type=int,
+        '-c', '--chunks', type=int,
         help='Split the file into `c` chunks')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80,
         help='Wrap lines at `w` when outputting FASTA (default %(const)s \
         when supplied alone)')
     parser.add_argument(
-        '--dir', nargs='?', default='',
+        '--dir', default='',
         help='Output to an existing directory, `dir`')
     parser.add_argument(
-        '--prefix', nargs='?', default='',
+        '--prefix', default='',
         help='Preceed seqid, or chunk number with `-c`, with `prefix`')
 
     args = parser.parse_args()
