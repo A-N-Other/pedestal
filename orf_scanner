@@ -189,7 +189,7 @@ if __name__ == '__main__':
         for hexamer and base-frequency modeling (when supplied with no files, \
         the longest 1000 ORFs from the `input` are used)')
     parser.add_argument(
-        '-l', '--min_length', default='300', nargs='?', type=int,
+        '-l', '--min_length', default='300', type=int,
         help='Minimum nucleotide length of ORFs to scan for (default \
         %(default)s)')
     parser.add_argument(
