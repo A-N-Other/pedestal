@@ -203,7 +203,7 @@ if __name__ == '__main__':
         help='Output GFF3 format instead of FASTA sequences')
     parser.add_argument(
         '--verbose', action='store_true',
-        help='Minimum length of ORFs to report')
+        help='Report progress and run information')
     args = parser.parse_args()
 
     stranded = True if 'stranded' in args else False
