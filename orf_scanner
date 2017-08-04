@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170802
+# GY170804
 
 ''' orf_scanner: robust CDS prediction '''
 
@@ -28,6 +28,30 @@ try:
 except AttributeError:
     from string import maketrans  # Py2
     _acgt_comp = maketrans(*trans)
+
+_aa_translate = {'TTT': 'F', 'TTC': 'F', 'TCT': 'S', 'TCC': 'S',
+                 'TAT': 'Y', 'TAC': 'Y', 'TGT': 'C', 'TGC': 'C',
+                 'TTA': 'L', 'TCA': 'S', 'TAA': '.', 'TGA': '.',
+                 'TTG': 'L', 'TCG': 'S', 'TAG': '.', 'TGG': 'W',
+                 'CCC': 'P', 'CTT': 'L', 'CTC': 'L', 'CCT': 'P',
+                 'CCC': 'P', 'CAC': 'H', 'CGC': 'R', 'CAT': 'H',
+                 'CAC': 'H', 'CGT': 'R', 'CGC': 'R', 'CCA': 'P',
+                 'CCG': 'P', 'CTA': 'L', 'CTG': 'L', 'CCA': 'P',
+                 'CCG': 'P', 'CAA': 'Q', 'CAG': 'Q', 'CGA': 'R',
+                 'CGG': 'R', 'CAA': 'Q', 'CAG': 'Q', 'CGA': 'R',
+                 'CGG': 'R', 'ACC': 'T', 'ATT': 'I', 'ATC': 'I',
+                 'ACT': 'T', 'ACC': 'T', 'AAC': 'N', 'AGC': 'S',
+                 'AAT': 'N', 'AAC': 'N', 'AGT': 'S', 'AGC': 'S',
+                 'ACA': 'T', 'AAA': 'K', 'AGA': 'R', 'ATA': 'I',
+                 'ACA': 'T', 'AAA': 'K', 'AGA': 'R', 'ACG': 'T',
+                 'AAG': 'K', 'AGG': 'R', 'ATG': 'M', 'ACG': 'T',
+                 'AAG': 'K', 'AGG': 'R', 'GCC': 'A', 'GTT': 'V',
+                 'GTC': 'V', 'GCT': 'A', 'GCC': 'A', 'GAC': 'D',
+                 'GGC': 'G', 'GAT': 'D', 'GAC': 'D', 'GGT': 'G',
+                 'GGC': 'G', 'GCA': 'A', 'GCG': 'A', 'GTA': 'V',
+                 'GTG': 'V', 'GCA': 'A', 'GCG': 'A', 'GAA': 'E',
+                 'GAG': 'E', 'GGA': 'G', 'GGG': 'G', 'GAA': 'E',
+                 'GAG': 'E', 'GGA': 'G', 'GGG': 'G'}
 
 # data structures
 seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
@@ -140,6 +164,11 @@ def rand_name(k=16):
     return ''.join(choice('abcdef0123456789') for i in range(k))  # Py2
 
 
+def aa(seq):
+    ''' Translate DNA '''
+    return ''.join(_aa_translate[codon] for codon in iterkmers(seq, 3, 3))
+
+
 ###############################################################################
 
 
@@ -159,12 +188,15 @@ if __name__ == '__main__':
         for hexamer and base-frequency modeling (when supplied with no files, \
         the longest 1000 ORFs from the `input` are used)')
     parser.add_argument(
-        '-l', '--min_length', const='300', nargs='?', type=int,
-        help='Minimum nucleotide length of ORFs (default %(const)s when \
-        supplied alone)')
+        '-l', '--min_length', default='300', nargs='?', type=int,
+        help='Minimum nucleotide length of ORFs to scan for (default \
+        %(default)s)')
     parser.add_argument(
         '-s', '--stranded', action='store_true',
         help='Consider only ORFs from sense frames')
+    parser.add_argument(
+        '-t', '--translate', action='store_true',
+        help='Output peptides in place of nucleotide sequences')
     parser.add_argument(
         '--gff3', action='store_true',
         help='Output GFF3 format instead of FASTA sequences')
@@ -246,11 +278,13 @@ if __name__ == '__main__':
                     bases[k] += orf.seq.count(k)
 
         logger.info('Calculating base and hexamer frequency models')
-        bases = {k:v/sum(bases.values()) for k, v in bases.items()}
+        base_sum = float(sum(bases.values()))
+        bases = {k:float(v)/base_sum for k, v in bases.items()}
         if any(v == 0 for v in hexamers.values()):
             for k in hexamers.keys():
                 hexamers[k] += 1
-        hexamers = {k:log10(v/sum(hexamers.values())/sum(bases[c] for c in k))
+        hex_sum = float(sum(hexamers.values()))
+        hexamers = {k:log10(float(v)/hex_sum/sum(bases[c] for c in k))
             for k, v in hexamers.items()}
 
     # Identify ORFs ###########################################################
@@ -282,8 +316,8 @@ if __name__ == '__main__':
                                 frame, 'ID=prot{}'.format(rand_name())))
                     else:
                         print('>{}_orf{}_{}_{}_{}\n{}'.format(
-                            record.seqid.split(' ')[0], j, start, end,
-                                frame, orf.seq))
+                            record.seqid.split(' ')[0], j, start, end, frame,
+                            aa(orf.seq) if 'translate' in args else orf.seq))
                     retained += 1
         logger.info('   {} sequences read'.format(i))
     logger.info('{} potential ORFs found'.format(retained))

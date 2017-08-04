@@ -85,10 +85,11 @@ cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 
 [**`orf_scanner`**](orf_scanner): robust CDS prediction
 ```bash
-orf_scanner [-h] [-m [MODEL ...]] [-l [MIN_LENGTH]] [-s] [--gff3] [-v] input ...
+orf_scanner [-h] [-m [MODEL ...]] [-l [MIN_LENGTH]] [-s] [-t] [--gff3] [-v] input ...
 --- usage examples ---
 orf_scanner file.fa -l 100 > file.cds.fa
 orf_scanner file.fa file2.fq -m ensembl_cds.fa --gff3 > cds.gff3
+orf_scanner *.fa -t > file.peps
 ```
 
 [**`rc`**](rc): reverse complement
