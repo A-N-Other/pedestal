@@ -167,7 +167,7 @@ def rand_name(k=16):
 
 def aa(seq):
     ''' Translate DNA '''
-    return ''.join(_aa_translate[codon] for codon in iterkmers(seq, 3, 3))
+    return ''.join(_aa_translate.get(codon, 'X') for codon in iterkmers(seq, 3, 3))
 
 
 ###############################################################################
