@@ -14,7 +14,8 @@ cuti file.csv -d, -n pvalue > pvalues
 
 [**`cons`**](cons): intelligent consensus formation
 ```bash
-cons [-h] -n NAME [-a [AMBIG]] [-m [MIN]] [-g [GLOB]] [-l [LOCAL]] [-s [SMOOTH]] [--retaingaps] [input]
+cons [-h] -n NAME [-a [AMBIG]] [-m [MIN]] [-g [GLOB]] [-l [LOCAL]]
+    [-s [SMOOTH]] [--retaingaps] [input]
 --- requirements ---
 numpy
 --- usage examples ---
