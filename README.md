@@ -93,6 +93,17 @@ linearise file.fq | grep -wF "test" | linearise -v > test.fq
 cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 ```
 
+
+
+[**`mutator`**](mutator): comprehensive DNA mutation simulation
+```bash
+mutator [-h] -c CYCLES [CYCLES ...] [-s [SUBSTITUTION]] [-i [INSERTION]] [-d [DELETION]]
+    [-r REPLICATES] [-l INDELLENGTH] [-w [WRAP]] [--verbose] [input ...]
+--- usage examples ---
+cat file.fa | mutator -c $(seq -s" " 25000 25000 10000000) -r 100 > mutated.fa
+mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
+```
+
 [**`orf_scanner`**](orf_scanner): robust CDS prediction
 ```bash
 orf_scanner [-h] [-m [MODEL ...]] [-l MIN_LENGTH] [-s] [-t] [--gff3] [--verbose] input ...

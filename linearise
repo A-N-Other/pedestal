@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170802
+# GY170807
 
 ''' linearise: FASTA <-> TSV conversion '''
 
@@ -74,15 +74,15 @@ def grouper(iterable, k):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(record, fileobj=stdout):
-    ''' Appropraitely prints a seqrecord or equivalent 2 or 3-item iterable '''
-    if len(record) == 3 and record[2]:
-        print('@{}\n{}\n+\n{}'.format(*record), file=fileobj)
+def printseq(seqid, seq, quals='', fileobj=stdout):
+    ''' Appropraitely prints a sequence '''
+    if quals:
+        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
     elif 'wrap' not in args:
-        print('>{}\n{}'.format(record[0], record[1]), file=fileobj)
+        print('>{}\n{}'.format(seqid, seq), file=fileobj)
     else:
-        print('>{}'.format(record[0]), file=fileobj)
-        for chunk in grouper(record[1], args.wrap):
+        print('>{}'.format(seqid, file=fileobj))
+        for chunk in grouper(seq, args.wrap):
             print(chunk, file=fileobj)
 
 
@@ -119,4 +119,4 @@ if __name__ == '__main__':
     else:
         for f in args.input:
             for l in f:
-                printseq(l.strip('\r\n').split('\t'))
+                printseq(*l.strip('\r\n').split('\t'))

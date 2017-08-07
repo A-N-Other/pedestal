@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170802
+# GY170807
 
 ''' interleavei: intelligent FASTA/Q interleaving '''
 
@@ -79,15 +79,15 @@ def grouper(iterable, k):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(record, fileobj=stdout):
-    ''' Appropraitely prints a seqrecord or equivalent 2 or 3-item iterable '''
-    if len(record) == 3 and record[2]:
-        print('@{}\n{}\n+\n{}'.format(*record), file=fileobj)
+def printseq(seqid, seq, quals='', fileobj=stdout):
+    ''' Appropraitely prints a sequence '''
+    if quals:
+        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
     elif 'wrap' not in args:
-        print('>{}\n{}'.format(record[0], record[1]), file=fileobj)
+        print('>{}\n{}'.format(seqid, seq), file=fileobj)
     else:
-        print('>{}'.format(record[0]), file=fileobj)
-        for chunk in grouper(record[1], args.wrap):
+        print('>{}'.format(seqid, file=fileobj))
+        for chunk in grouper(seq, args.wrap):
             print(chunk, file=fileobj)
 
 
@@ -130,19 +130,19 @@ if __name__ == '__main__':
                     if read2:
                         r2id = read2.seqid.split(' ')[0]
                     if read1 and read2 and r1id == r2id:
-                        printseq(read1)
-                        printseq(read2)
+                        printseq(*read1)
+                        printseq(*read2)
                     else:
                         if read1:
                             if r1id in brokenpairs:
-                                printseq(read1)
-                                printseq(brokenpairs.pop(r1id))
+                                printseq(*read1)
+                                printseq(*brokenpairs.pop(r1id))
                             else:
                                 brokenpairs[r1id] = read1
                         if read2:
                             if r2id in brokenpairs:
-                                printseq(read2)
-                                printseq(brokenpairs.pop(r2id))
+                                printseq(*read2)
+                                printseq(*brokenpairs.pop(r2id))
                             else:
                                 brokenpairs[r2id] = read2
             if brokenpairs:
@@ -159,8 +159,8 @@ if __name__ == '__main__':
                 for read in F:
                     rid = read.seqid.split(' ')[0]
                     if rid in brokenpairs:
-                        printseq(read)
-                        printseq(brokenpairs.pop(rid))
+                        printseq(*read)
+                        printseq(*brokenpairs.pop(rid))
                     else:
                         brokenpairs[rid] = read
             if brokenpairs:

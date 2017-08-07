@@ -1,0 +1,217 @@
+#!/usr/bin/env python
+
+# GY170807
+
+''' mutator: comprehensive DNA mutation simulation '''
+
+
+from __future__ import print_function  # Py2
+from argparse import ArgumentParser, FileType, SUPPRESS
+from collections import namedtuple
+import logging
+from math import ceil
+import random
+from signal import signal, SIGPIPE, SIG_DFL
+from sys import stdin, stdout, version_info
+
+
+if not version_info >= (3, 6):
+    raise Exception('Python 3.6 or later is required')
+
+
+# Globals #####################################################################
+
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+
+# data structures
+seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
+
+# mutations
+nucleotides = ['A', 'T', 'G', 'C']
+mut_freq = {
+    'A': ['T'] + ['G']*3 + ['C'],
+    'T': ['A'] + ['G'] + ['C']*3,
+    'G': ['A']*3 + ['T'] + ['C'],
+    'C': ['A'] + ['T']*3 + ['G'],
+}
+for c in 'XNRYWSKMDVHB':
+    mut_freq[c] = nucleotides
+
+
+# Classes #####################################################################
+
+
+class MultiReader(object):
+    ''' A class for reading FASTA/Q records '''
+
+    def __init__(self, inputstream):
+        self._fileobj = inputstream
+        self._buffer = ' '
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        pass
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while self._buffer and self._buffer[0] not in ('>', '@'):
+            self._buffer = self._fileobj.readline()
+        if not self._buffer:
+            raise StopIteration
+        if self._buffer[0] == ">":
+            seqid = self._buffer[1:].strip()
+            self._buffer = self._fileobj.readline()
+            seqlines = []
+            while self._buffer and self._buffer[0] not in ('>', '@'):
+                seqlines.append(self._buffer.strip())
+                self._buffer = self._fileobj.readline()
+            return seqrecord(
+                seqid, ''.join(seqlines).upper().replace('U', 'T'), '')
+        else:
+            seqid = self._buffer[1:].strip()
+            seq = self._fileobj.readline().strip().upper()
+            self._fileobj.readline()
+            quals = self._fileobj.readline().strip()
+            self._buffer = self._fileobj.readline()
+            return seqrecord(seqid, seq.replace('U', 'T'), quals)
+
+    next = __next__  # Py2 compatibility
+
+
+# Functions ###################################################################
+
+
+def mutate(record, changes):
+    ''' Mutate and return a FASTA record '''
+    seq = list(record.seq)
+    for change in changes:
+        loc = random.randrange(0, len(seq))
+        if change == 's':
+            seq[loc] = random.choice(mut_freq[seq[loc]])
+        else:
+            indel_len = random.choices(
+                [i for i in range(1, len(indel_len_freq)+1)], indel_len_freq)[0]
+            if change == 'i':
+                seq[loc+1:loc+1] = random.choices(nucleotides, k=indel_len)
+            elif change == 'd':
+                seq[loc:loc+indel_len] = []
+    return record._replace(seq=''.join(seq), quals='')
+
+
+def grouper(iterable, k):
+    ''' Yield a memory-mapped iterable in chunks of `k` '''
+    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+        yield iterable[i*k:i*k+k]
+
+
+def printseq(seqid, seq, quals='', fileobj=stdout):
+    ''' Appropraitely prints a sequence '''
+    if quals:
+        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
+    elif 'wrap' not in args:
+        print('>{}\n{}'.format(seqid, seq), file=fileobj)
+    else:
+        print('>{}'.format(seqid, file=fileobj))
+        for chunk in grouper(seq, args.wrap):
+            print(chunk, file=fileobj)
+
+
+###############################################################################
+
+
+if __name__ == '__main__':
+
+    # Parse commandline args ##################################################
+
+    parser = ArgumentParser(
+        description='mutator: comprehensive mutation simulation',
+        epilog='Default rates are per human generation (~25 years), from \
+        [doi:10.1016/j.tig.2013.04.005]. Mouse: -s 5.4e-9 and -i/-d 1.55e-10 \
+        [doi:10.1101/gr.186148.114] with 3 generations per year. Rat: -s \
+        4.2e-9 [doi:10.1534/g3.112.004713] with 2 generations per year. Indel \
+        lengths are generated using a probabilistic function derived from \
+        [doi:10.1186/s12859-015-0483-6].',
+        argument_default=SUPPRESS)
+    parser.add_argument(
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='Input file(s) (use "-" or leave blank for stdin)')
+    parser.add_argument(
+        '-s', '--substitution', default=1.16e-8, nargs='?', type=float,
+        help='Substitution frequency (default %(default)s)')
+    parser.add_argument(
+        '-i', '--insertion', default=2e-10, nargs='?', type=float,
+        help='Insertion frequency (default %(default)s)')
+    parser.add_argument(
+        '-d', '--deletion', default=5.5e-10, nargs='?', type=float,
+        help='Deletion frequency (default %(default)s)')
+    parser.add_argument(
+        '-c', '--cycles', required=True, nargs='+', type=int,
+        help='Cycle(s) (years/generations/etc) to simulate')
+    parser.add_argument(
+        '-r', '--replicates', default=1, type=int,
+        help='Per-sequence replicates required (default %(default)s)')
+    parser.add_argument(
+        '-l', '--indellength', default=50, type=int,
+        help='Maximum size indel to model (default %(default)s)')
+    parser.add_argument(
+        '-w', '--wrap', nargs='?', type=int, const=80,
+        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        supplied alone)')
+    parser.add_argument(
+        '--verbose', action='store_true',
+        help='Report progress and run information')
+    args = parser.parse_args()
+
+
+    # Setup logging system ####################################################
+
+    logger = logging.getLogger()
+    logstream = logging.StreamHandler()
+    logstream.setFormatter(logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s', '%y%m%d %H:%M:%S'))
+
+    if 'verbose' in args:
+        loglevel = logging.INFO
+    else:
+        loglevel = logging.ERROR
+
+    logging.basicConfig(level=loglevel, handlers=[logstream])
+
+    # Generics ################################################################
+
+    indel_len_freq = [float(i)**-1.8797 for i in range(1, args.indellength+1)]
+
+    # Generate a large pool of changes that we will select events from
+    changepool = ['s'] * int(ceil(1e+12 * args.substitution))
+    changepool += ['i'] * int(ceil(1e+12 * args.insertion))
+    changepool += ['d'] * int(ceil(1e+12 * args.deletion))
+
+    ###########################################################################
+
+    logger.info('Started mutator')
+    logger.info('  substitution rate = {}'.format(args.substitution))
+    logger.info('  insertion rate = {}'.format(args.insertion))
+    logger.info('  deletion rate = {}'.format(args.deletion))
+    if args.insertion or args.deletion:
+        logger.info('  max indel length = {}'.format(args.indellength))
+
+    for f in args.input:
+        with MultiReader(f) as F:
+            for i, record in enumerate(F, 1):
+                logger.info('Mutating {}'.format(record.seqid))
+                for c in sorted(args.cycles):
+                    # Number of changes for `c` cycles across the record length
+                    n_changes = int(ceil(len(record.seq) * c *
+                        (args.substitution + args.insertion + args.deletion)))
+                    for r in range(1, args.replicates+1):
+                        _record = mutate(
+                            record, random.sample(changepool, n_changes))
+                        printseq('{} cycle:{} replicate:{}'.format(
+                            _record.seqid, c, r), _record.seq, _record.quals)
+
+    logger.info('Done!')

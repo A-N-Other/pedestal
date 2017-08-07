@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170804
+# GY170807
 
 ''' orf_scanner: robust CDS prediction '''
 
@@ -10,10 +10,11 @@ from argparse import ArgumentParser, FileType, SUPPRESS
 from collections import namedtuple
 from itertools import product
 import logging
-from math import log10
+from math import log10, ceil
 from random import choice
 import re
 from signal import signal, SIGPIPE, SIG_DFL
+from sys import stdout
 
 
 # Globals #####################################################################
@@ -170,6 +171,24 @@ def aa(seq):
     return ''.join(_aa_translate.get(codon, 'X') for codon in iterkmers(seq, 3, 3))
 
 
+def grouper(iterable, k):
+    ''' Yield a memory-mapped iterable in chunks of `k` '''
+    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+        yield iterable[i*k:i*k+k]
+
+
+def printseq(seqid, seq, quals='', fileobj=stdout):
+    ''' Appropraitely prints a sequence '''
+    if quals:
+        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
+    elif 'wrap' not in args:
+        print('>{}\n{}'.format(seqid, seq), file=fileobj)
+    else:
+        print('>{}'.format(seqid, file=fileobj))
+        for chunk in grouper(seq, args.wrap):
+            print(chunk, file=fileobj)
+
+
 ###############################################################################
 
 
@@ -198,6 +217,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '-t', '--translate', action='store_true',
         help='Output peptides in place of nucleotide sequences')
+    parser.add_argument(
+        '-w', '--wrap', nargs='?', type=int, const=80,
+        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        supplied alone)')
     parser.add_argument(
         '--gff3', action='store_true',
         help='Output GFF3 format instead of FASTA sequences')
@@ -316,9 +339,9 @@ if __name__ == '__main__':
                             .format(record.seqid.split(' ')[0], start, end,
                                 frame, 'ID=prot{}'.format(rand_name())))
                     else:
-                        print('>{}_orf{}_{}_{}_{}\n{}'.format(
-                            record.seqid.split(' ')[0], j, start, end, frame,
-                            aa(orf.seq) if 'translate' in args else orf.seq))
+                        printseq('>{}_orf{}_{}_{}_{}'.format(
+                            record.seqid.split(' ')[0], j, start, end, frame),
+                            aa(orf.seq) if 'translate' in args else orf.seq)
                     retained += 1
         logger.info('   {} sequences read'.format(i))
     logger.info('{} potential ORFs found'.format(retained))
