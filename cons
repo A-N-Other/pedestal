@@ -296,4 +296,4 @@ if __name__ == '__main__':
 
     if 'retaingaps' not in args:
         cons = [base for base in cons if base != '-']
-    printseq(args.name, cons)
+    printseq(args.name, ''.join(cons))
