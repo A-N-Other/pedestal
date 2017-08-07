@@ -229,8 +229,6 @@ if __name__ == '__main__':
         help='Report progress and run information')
     args = parser.parse_args()
 
-    stranded = True if 'stranded' in args else False
-
     # Setup logging system ####################################################
 
     logger = logging.getLogger()
@@ -280,7 +278,8 @@ if __name__ == '__main__':
                 logger.info('... {}'.format(f.name))
                 with MultiReader(f) as F:
                     for i, record in enumerate(F, 1):
-                        orf = find_orfs(record, orf_pattern, True, stranded)
+                        orf = find_orfs(record, orf_pattern, True,
+                            True if 'stranded' in args else False)
                         if orf and longest_orfs:
                             for j, item in enumerate(longest_orfs):
                                 if orf_len(orf[0]) > orf_len(item):
@@ -321,7 +320,8 @@ if __name__ == '__main__':
         with MultiReader(f) as F:
             for i, record in enumerate(F, 1):
                 for j, orf in enumerate(
-                        find_orfs(record, orf_pattern, False, stranded), 1):
+                        find_orfs(record, orf_pattern, False,
+                            True if 'stranded' in args else False), 1):
                     if 'model' in args:
                         frame_scores = score_frames(orf.seq)
                         if frame_scores[0] >= max(frame_scores[1:]):
