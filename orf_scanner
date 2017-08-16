@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170807
+# GY170816
 
 ''' orf_scanner: robust CDS prediction '''
 
@@ -336,11 +336,11 @@ if __name__ == '__main__':
                     start += 1
                     if 'gff3' in args:
                         print('{}\torf_scanner\tprotein\t{}\t{}\t.\t{}\t0\t{}'
-                            .format(record.seqid.split(' ')[0], start, end,
+                            .format(record.seqid, start, end,
                                 frame, 'ID=prot{}'.format(rand_name())))
                     else:
-                        printseq('>{}_orf{}_{}_{}_{}'.format(
-                            record.seqid.split(' ')[0], j, start, end, frame),
+                        printseq('>{} orf{}_{}_{}_{}'.format(
+                            record.seqid, j, start, end, frame),
                             aa(orf.seq) if 'translate' in args else orf.seq)
                     retained += 1
         logger.info('   {} sequences read'.format(i))
