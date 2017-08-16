@@ -339,7 +339,7 @@ if __name__ == '__main__':
                             .format(record.seqid, start, end,
                                 frame, 'ID=prot{}'.format(rand_name())))
                     else:
-                        printseq('>{} orf{}_{}_{}_{}'.format(
+                        printseq('{} orf{}_{}_{}_{}'.format(
                             record.seqid, j, start, end, frame),
                             aa(orf.seq) if 'translate' in args else orf.seq)
                     retained += 1
