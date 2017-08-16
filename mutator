@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170807
+# GY170816
 
 ''' mutator: comprehensive DNA mutation simulation '''
 
@@ -30,10 +30,10 @@ seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
 # mutations
 nucleotides = ['A', 'T', 'G', 'C']
 mut_freq = {
-    'A': ['T'] + ['G']*3 + ['C'],
-    'T': ['A'] + ['G'] + ['C']*3,
-    'G': ['A']*3 + ['T'] + ['C'],
-    'C': ['A'] + ['T']*3 + ['G'],
+    'A': ['T'] + ['G']*2 + ['C'],
+    'T': ['A'] + ['G'] + ['C']*2,
+    'G': ['A']*2 + ['T'] + ['C'],
+    'C': ['A'] + ['T']*2 + ['G'],
 }
 for c in 'XNRYWSKMDVHB':
     mut_freq[c] = nucleotides
@@ -135,7 +135,9 @@ if __name__ == '__main__':
         [doi:10.1101/gr.186148.114] with 3 generations per year. Rat: -s \
         4.2e-9 [doi:10.1534/g3.112.004713] with 2 generations per year. Indel \
         lengths are generated using a probabilistic function derived from \
-        [doi:10.1186/s12859-015-0483-6].',
+        [doi:10.1186/s12859-015-0483-6]. Transition:transversion ratios are \
+        set at 2 - a genome-wide estimate that is lower than seen in exomes \
+        alone [doi:10.1016/j.tig.2013.04.005].',
         argument_default=SUPPRESS)
     parser.add_argument(
         'input', nargs='*', type=FileType('r'), default=[stdin],
