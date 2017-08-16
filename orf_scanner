@@ -222,6 +222,9 @@ if __name__ == '__main__':
         help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
         supplied alone)')
     parser.add_argument(
+        '--longest_only', action='store_true',
+        help='Output only the longest ORF for each input sequence')
+    parser.add_argument(
         '--gff3', action='store_true',
         help='Output GFF3 format instead of FASTA sequences')
     parser.add_argument(
@@ -320,7 +323,8 @@ if __name__ == '__main__':
         with MultiReader(f) as F:
             for i, record in enumerate(F, 1):
                 for j, orf in enumerate(
-                        find_orfs(record, orf_pattern, False,
+                        find_orfs(record, orf_pattern,
+                            True if 'longest_only' in args else False,
                             True if 'stranded' in args else False), 1):
                     if 'model' in args:
                         frame_scores = score_frames(orf.seq)
