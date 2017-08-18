@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170816
+# GY170817
 
 ''' mutator: comprehensive DNA mutation simulation '''
 
@@ -98,7 +98,7 @@ def mutate(record, changes):
                 [i for i in range(1, len(indel_len_freq)+1)], indel_len_freq)[0]
             if change == 'i':
                 seq[loc+1:loc+1] = random.choices(nucleotides, k=indel_len)
-            elif change == 'd':
+            else change == 'd':
                 seq[loc:loc+indel_len] = []
     return record._replace(seq=''.join(seq), quals='')
 
