@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170817
+# GY170824
 
 ''' mutator: comprehensive DNA mutation simulation '''
 
@@ -158,7 +158,7 @@ if __name__ == '__main__':
         '-r', '--replicates', default=1, type=int,
         help='Per-sequence replicates required (default %(default)s)')
     parser.add_argument(
-        '-l', '--indellength', default=50, type=int,
+        '-l', '--indellength', default=20, type=int,
         help='Maximum size indel to model (default %(default)s)')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80,
