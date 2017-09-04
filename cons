@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 
-# GY170807
+# GY170904
 
 ''' cons: intelligent consensus formation '''
 
 
 from __future__ import print_function  # Py2
-from collections import defaultdict as dd
 from argparse import ArgumentParser, FileType, SUPPRESS
-from sys import stdin, stdout
-from collections import namedtuple
+from collections import defaultdict as dd, namedtuple
+from bisect import insort
+from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
+from sys import stdin, stdout, stderr
 
 
 # Globals #####################################################################
@@ -20,6 +21,7 @@ signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 # data structures
 fastarecord = namedtuple('fastarecord', ['seqid', 'seq'])
+depthrange = namedtuple('depthrange', ['start', 'stop', 'depth'])
 
 iupac_codes = {
     'AG': 'R', 'CT': 'Y', 'CG': 'S', 'AT': 'W', 'GT': 'K', 'AC': 'M',
@@ -62,93 +64,43 @@ class FastaReader(object):
     next = __next__
 
 
+class RunningMedian(object):
+
+    def __init__(self):
+        self._lows = []
+        self._highs = []
+
+    def __call__(self, n):
+        n = float(n)
+        if not self._lows or n < max(self._lows):
+            insort(self._lows, n)
+            if len(self._lows) - len(self._highs) > 1:
+                self._highs = [self._lows.pop()] + self._highs
+        else:
+            insort(self._highs, n)
+            if len(self._highs) - len(self._lows) > 1:
+                self._lows.append(self._highs.pop(0))
+        return self.median()
+
+    def median(self):
+        if len(self._lows) == len(self._highs):
+            return (self._lows[-1] + self._highs[0]) / 2.0
+        elif len(self._lows) > len(self._highs):
+            return self._lows[-1]
+        # else implied
+        return self._highs[0]
+
+
 # Functions ###################################################################
 
 
-def poisson(data):
-        ''' A cost function with a poisson distribution and changing mean
-        Args:
-            data (:obj:`list` of float): 1D time series data
-        Returns:
-            function: Function with signature
-                (int, int) -> float
-                where the first arg is the starting index, and the second
-                is the last arg. Returns the cost of that segment'''
-
-        data = np.hstack(([0.0], np.array(data)))
-        cumm = np.cumsum(data)
-
-        def cost(s, t):
-            ''' Cost function
-            Args:
-                start (int): start index
-                end (int): end index
-            Returns:
-                float: Cost, from start to end'''
-
-            diff = cumm[t]-cumm[s]
-            if diff == 0:
-                return -2 * diff * (- np.log(t-s) - 1)
-            else:
-                return -2 * diff * (np.log(diff) - np.log(t-s) - 1)
-
-        return cost
-
-
-def pelt(cost, length, pen=None):
-    ''' Pure Python implementation of the PELT algorithm to compute time
-    series changepoints ... from https://github.com/ruipgil/changepy
-
-    Args:
-        cost (function): cost function, with the following signature,
-            (int, int) -> float
-            where the parameters are the start index, and the second
-            the last index of the segment to compute the cost.
-        length (int): Data size
-        pen (float, optional): defaults to log(n)
-    Returns:
-        (:obj:`list` of int): List with the indexes of changepoints '''
-
-    def find_min(arr, val=0.0):
-        ''' Finds the minimum value and index
-        Args:
-            arr (np.array)
-            val (float, optional): value to add
-        Returns:
-            (float, int): minimum value and index '''
-        return min(arr) + val, np.argmin(arr)
-
-    if pen is None:
-        pen = np.log(length)
-
-    F = np.zeros(length + 1)
-    R = np.array([0], dtype=np.int)
-    candidates = np.zeros(length + 1, dtype=np.int)
-
-    F[0] = -pen
-
-    for tstar in range(2, length + 1):
-        cpt_cands = R
-        seg_costs = np.zeros(len(cpt_cands))
-        for i in range(0, len(cpt_cands)):
-            seg_costs[i] = cost(cpt_cands[i], tstar)
-
-        F_cost = F[cpt_cands] + seg_costs
-        F[tstar], tau = find_min(F_cost, pen)
-        candidates[tstar] = cpt_cands[tau]
-
-        ineq_prune = [val < F[tstar] for val in F_cost]
-        R = [cpt_cands[j] for j, val in enumerate(ineq_prune) if val]
-        R.append(tstar - 1)
-        R = np.array(R, dtype=np.int)
-
-    last = candidates[-1]
-    changepoints = [last]
-    while last > 0:
-        last = candidates[last]
-        changepoints.append(last)
-
-    return sorted(changepoints)
+def median(x):
+    ''' Return the median '''
+    x = sorted(x)
+    if len(x) & 1:
+        return float(x[len(x)//2])
+    # else implied
+    return sum(x[len(x)//2-1:len(x)//2+1]) / 2.0
 
 
 def consensus_base(base, iupac=False):
@@ -210,9 +162,9 @@ if __name__ == '__main__':
         help='Sequence identifier for the consensus')
     parser.add_argument(
         '-a', '--ambig', nargs='?', const=0.5, type=float,
-        help='Use IUPAC ambiguity codes, including all bases >= `a` fold \
-        as frequent as the most frequent nucleotide at the position \
-        (default %(const)s)')
+        help='Use IUPAC ambiguity codes to represent positions where any base \
+        is >= `a` fold as frequent as the most frequent nucleotide at the \
+        position (default %(const)s)')
     parser.add_argument(
         '-m', '--min', default=2, nargs='?', type=int,
         help='Only ever include sites >= depth `m` (default %(default)s)')
@@ -221,7 +173,7 @@ if __name__ == '__main__':
         help='The per-site required alignment depth must be >= \
         max(`g`*totaldepth, `m`) (default %(const)s)')
     parser.add_argument(
-        '-l', '--local', const=0.5, nargs='?', type=float,
+        '-l', '--loc', const=0.5, nargs='?', type=float,
         help='The per-site required alignment depth is calculated in \
         comparison to its local region, and must be >= \
         max(`l`*localdepth, `m`) (default %(const)s). When combined with `g`, \
@@ -236,63 +188,78 @@ if __name__ == '__main__':
         supplied alone)')
     parser.add_argument(
         '--retaingaps', action='store_true',
-        help='Retain gap characters in consensus')
+        help='Retain gap characters in consensus (useful for comparing to \
+        original alignment)')
+    parser.add_argument(
+        '--changepoints', action='store_true',
+        help='Print the changepoints detected with `-l` to stderr (start, \
+        stop, median depth)')
     args = parser.parse_args()
-
-    # import here so that we can print the help without dying on import failure
-    import numpy as np
 
     with FastaReader(args.input) as F:
         for i, record in enumerate(F):
             if not i:
-                aln = [dd(int) for i in range(len(record.seq))]
+                aln = [dd(int) for _ in range(len(record.seq))]
             for j, base in enumerate(record.seq):
                 aln[j][base] += 1
 
     totaldepth = i + 1
 
-    if not 'local' in args:
+    if not 'loc' in args:
 
-        depth_req = max(args.min,
-            np.ceil(args.glob * totaldepth) if 'glob' in args else 0)
-        cutoff = totaldepth - depth_req
+        depth_req = totaldepth - max(args.min,
+            ceil(args.glob * totaldepth) if 'glob' in args else 0)
         cons = [consensus_base(base, args.ambig if 'ambig' in args else False)
-            if base.get('-', 0) <= cutoff else '-' for base in aln]
+            if base.get('-', 0) <= depth_req else '-' for base in aln]
 
     else:
 
         depths = [sum(v for k, v in base.items() if k != '-') for base in aln]
-        changepoints = list(pelt(poisson(np.array(depths)), len(depths)))
-        changepoints.append(len(aln))
+        changes, m = [], 0
+        med = RunningMedian()
+        for i, depth in enumerate(depths):
+            # Changepoint if depth differs from the running median +- slop
+            if not m * 0.9 < depth < m * 1.1:
+                changes.append(i)
+                # Reset the running median
+                med = RunningMedian()
+            m = med(depth)
+        changes.append(len(aln))
 
-        changes = [(changepoints[0], changepoints[1],
-            np.median(depths[changepoints[0]:changepoints[1]]))]
-        for i, c in enumerate(changepoints[1:-1], 1):
-            local_depth = np.median(depths[c:changepoints[i+1]])
-            if local_depth > changes[-1][2] * 1.1:
-                changes.append((c, changepoints[i+1], local_depth))
-            elif local_depth < changes[-1][2] * args.local and \
-                changepoints[i+1] - c < args.smooth:
-                changes[-1] = (changes[-1][0], changepoints[i+1],
-                    np.median(depths[changes[-1][0]:changepoints[i+1]]))
-            elif local_depth >= changes[-1][2] * 0.9:
-                changes[-1] = (changes[-1][0], changepoints[i+1],
-                    np.median(depths[changes[-1][0]:changepoints[i+1]]))
+        # Smooth the changepoints
+        _changes = [depthrange(changes[0], changes[1],
+            median(depths[changes[0]:changes[1]]))]
+        for i, c in enumerate(changes[1:-1], 1):
+            region_depth = median(depths[c:changes[i+1]])
+            # If the depths are equivalent, extend previous
+            if _changes[-1].depth * 0.9 <= region_depth <= _changes[-1].depth * 1.1:
+                _changes[-1] = _changes[-1]._replace(
+                    stop=changes[i+1],
+                    depth=median(depths[_changes[-1].start:changes[i+1]]))
+            # Else if the depth decreases then filter on size
+            elif region_depth < _changes[-1].depth and changes[i+1] - c < args.smooth:
+                _changes[-1] = _changes[-1]._replace(
+                    stop=changes[i+1],
+                    depth=median(depths[_changes[-1].start:changes[i+1]]))
+            # Else allow the changepoint
             else:
-                changes.append((c, changepoints[i+1], local_depth))
-        changepoints = [c[0] for c in changes] + [len(aln)]
+                _changes.append(depthrange(
+                    c, changes[i+1], region_depth))
+        changes = _changes
+
+        if 'changepoints' in args:
+            for c in changes:
+                print(*c, file=stderr)
 
         cons = []
-        for region in (changepoints[i:i+2] for i in range(len(changepoints)-1)):
-            local_depth = np.ceil(
-                float(sum(depths[region[0]:region[1]])) / (region[1]-region[0]))
-            if 'glob' in args and local_depth < totaldepth * args.glob:
-                cons += ['-' for base in aln[region[0]:region[1]]]
+        for region in changes:
+            if 'glob' in args and region.depth < totaldepth * args.glob:
+                cons += ['-' for base in aln[region.start:region.stop]]
                 continue
-            depth_req = max(args.min, np.ceil(args.local * local_depth))
-            cutoff = totaldepth - depth_req
+            # else implied
+            depth_req = totaldepth - max(args.min, ceil(args.loc * region.depth))
             cons += [consensus_base(base, args.ambig if 'ambig' in args else False)
-                if base.get('-', 0) <= cutoff else '-' for base in aln[region[0]:region[1]]]
+                if base.get('-', 0) <= depth_req else '-' for base in aln[region.start:region.stop]]
 
     if 'retaingaps' not in args:
         cons = [base for base in cons if base != '-']
