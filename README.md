@@ -95,7 +95,7 @@ cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 
 [**`mutator`**](mutator): comprehensive DNA mutation simulation
 
-`mutator` simulates both substitution and indel mutation at user-defined rates, or for the human by default. `mutator` can output sequential rounds (generations / years) of mutation within a single run, and output a requested number of replicates at each point.
+`mutator` simulates both substitution and indel mutation at user-defined rates, or for the human by default. `mutator` can output sequential `-c/--cycles` (generations / years) of mutation within a single run, and output a requested number of `-r/--replicates` for each cycle. Importantly, `mutator` does not sample from a pool of mutations generated to represent the cycles but directly uses their relative probabilities, ensuring that low-frequency events can still occur in early mutation cycles.
 ```bash
 mutator [-h] -c CYCLES [CYCLES ...] [-s [SUBSTITUTION]] [-i [INSERTION]] [-d [DELETION]]
     [-r REPLICATES] [-l INDELLENGTH] [-w [WRAP]] [--verbose] [input ...]
@@ -108,7 +108,7 @@ mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
 
 [**`orf_scanner`**](orf_scanner): robust CDS prediction
 
-`orf_scanner` outputs ORFs (as AAs with `-t/--translate`) or their positions (with `--gff3`) derived from input sequences. With `-m/--model`, `orf_scanner` will build a hexamer model using supplied validated data (e.g. Ensembl CDSes) and output only ORFs that fit this model.
+`orf_scanner` outputs ORFs (or as AAs with `-t/--translate`) or their positions (`--gff3`) derived from input sequences. With `-m/--model`, `orf_scanner` will build a hexamer model using supplied validated data (e.g. Ensembl CDSes) and output only ORFs that contain suitable hexamers.
 ```bash
 orf_scanner [-h] [-m [MODEL ...]] [-l MIN_LENGTH] [-s] [-t] [--longest_only] [--gff3] [--verbose] input ...
 --- usage examples ---
