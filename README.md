@@ -13,6 +13,7 @@ cuti file.csv -d, -n pvalue > pvalues
 ```
 
 [**`cons`**](cons): intelligent consensus formation
+
 `cons` aims to solve problems deriving accurate consensus data from alignments with uneven depths across their length. This is a frequent problem with alignments of sequences clustered by [`vsearch`](https://github.com/torognes/vsearch), [`usearch`](http://www.drive5.com/usearch/), or [`cd-hit-est`](http://weizhongli-lab.org/cd-hit/). Intuitively, a small region of low depth within a larger region of higher depth is of comparatively less relevance than if the same low depth formed a larger, indepentent, region at a different position within the alignment. Normal methods using thresholding approaches will either remove all or include all of these regions, if the threshold is high or low, respectively. `cons` run with `-l/--local` treats the alignment as a time series, and performs changepoint detection to determine regions of equivalent depth. These are smoothed (`-s/--smooth`) to remove small regions present due to indels, for example, and a consensus is derived using thresholds appropriate for each region independently.
 ```bash
 cons [-h] -n NAME [-a [AMBIG]] [-m [MIN]] [-g [GLOB]] [-l [LOCAL]]
@@ -93,6 +94,7 @@ cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 ```
 
 [**`mutator`**](mutator): comprehensive DNA mutation simulation
+
 `mutator` simulates both substitution and indel mutation at user-defined rates, or for the human by default. `mutator` can output sequential rounds (generations / years) of mutation within a single run, and output a requested number of replicates at each point.
 ```bash
 mutator [-h] -c CYCLES [CYCLES ...] [-s [SUBSTITUTION]] [-i [INSERTION]] [-d [DELETION]]
@@ -105,6 +107,7 @@ mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
 ```
 
 [**`orf_scanner`**](orf_scanner): robust CDS prediction
+
 `orf_scanner` outputs ORFs (as AAs with `-t/--translate`) or their positions (with `--gff3`) derived from input sequences. With `-m/--model`, `orf_scanner` will build a hexamer model using supplied validated data (e.g. Ensembl CDSes) and output only ORFs that fit this model.
 ```bash
 orf_scanner [-h] [-m [MODEL ...]] [-l MIN_LENGTH] [-s] [-t] [--longest_only] [--gff3] [--verbose] input ...
