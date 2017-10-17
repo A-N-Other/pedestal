@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170904
+# GY171017
 
 ''' cons: intelligent consensus formation '''
 
@@ -141,7 +141,7 @@ def printseq(seqid, seq, quals='', fileobj=stdout):
     elif 'wrap' not in args:
         print('>{}\n{}'.format(seqid, seq), file=fileobj)
     else:
-        print('>{}'.format(seqid, file=fileobj))
+        print('>{}'.format(seqid), file=fileobj)
         for chunk in grouper(seq, args.wrap):
             print(chunk, file=fileobj)
 

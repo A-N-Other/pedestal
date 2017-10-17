@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170807
+# GY171017
 
 ''' explode: split FASTA/Q records to new files '''
 
@@ -86,7 +86,7 @@ def printseq(seqid, seq, quals='', fileobj=stdout):
     elif 'wrap' not in args:
         print('>{}\n{}'.format(seqid, seq), file=fileobj)
     else:
-        print('>{}'.format(seqid, file=fileobj))
+        print('>{}'.format(seqid), file=fileobj)
         for chunk in grouper(seq, args.wrap):
             print(chunk, file=fileobj)
 
@@ -127,9 +127,9 @@ if __name__ == '__main__':
         for f in args.input:
             with MultiReader(f) as F:
                 for record in F:
-                    n = sanitise(record.seqid.split(' ')[0])
-                    n = path.join(args.dir, args.prefix + n + \
-                        '.fq' if record.quals else '.fa')
+                    n = sanitise(record.seqid.split()[0])
+                    n = path.join(args.dir, '{}{}.{}'.format(args.prefix, n,
+                        'fq' if record.quals else 'fa'))
                     with open(n, 'w') as outfile:
                         printseq(*record, outfile)
 
