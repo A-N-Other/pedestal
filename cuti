@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# GY170804
+# GY180504
 
 
 ''' cuti: ordering and selection of columnar data '''
@@ -78,7 +78,7 @@ if __name__ == '__main__':
             colorder = [i if i < len(l) else None for i in args.fields]
         if any(c is None for c in colorder):
             print('WARNING: Missing fields or column names in {}!'.format(
-                f.name, file=stderr))
+                f.name), file=stderr)
 
         # create a format string, replacing None with args.fill
         outputfmt = args.delim.join(
