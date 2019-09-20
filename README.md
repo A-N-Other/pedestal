@@ -5,6 +5,7 @@ A collection of bash wrappers and Python scripts that facilitate working in the 
 ---
 
 Requirements: Python >= 3.8
+
 Support for Python 2 has been dropped moving forward. Changes will be rolled out on a per-script basis.
 
 ---
