@@ -22,6 +22,8 @@ cat aligned.fa | cons -n mycons -l > aligned.cons
 ```
 
 [**`cuti`**](cuti): ordering and selection of columnar data
+
+Builds on UNIX `cut` to allow re-ordering of selected columns
 ```bash
 cuti [-h] (-n NAMES [NAMES ...] | -f FIELDS) [-d DELIM] [--fill FILL] [input ...]
 --- usage examples ---
@@ -104,7 +106,7 @@ Conversion of FASTA/Q data to and from a columnar format to facilitate common te
 ```bash
 linearise [-h] [-v] [-w [WRAP]] [input ...]
 --- usage examples ---
-linearise file.fq | grep -wF "test" | linearise -v > test.fq
+linearise file.fq | cut -f2 | parallel "wc -c" | graph
 cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 ```
 
@@ -126,9 +128,8 @@ mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
 orf_scanner [-h] [-m [MODEL [MODEL ...]]] [-l [CDS_LEN] | -p [CDS_LEN]] [--unstranded]
     [--longest] [--complete] [-w [WRAP]] [-q] [input [input ...]]
 --- usage examples ---
-orf_scanner file.fa -l 100 > file.cds.fa
-orf_scanner file.fa file2.fq -m ensembl_cds.fa --gff3 > cds.gff3
-orf_scanner *.fa -t > file.peps
+cat *.fa | orf_scanner -l --unstranded > file.cds.fa
+orf_scanner file.fa file2.fq -m ensembl_cds.fa --longest -w > cds.fa
 ```
 
 [**`rc`**](rc): reverse complement
