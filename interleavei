@@ -1,41 +1,46 @@
 #!/usr/bin/env python
 
-# GY171017
+# GY190919
 
-''' interleavei: intelligent FASTA/Q interleaving '''
+''' interleavei: intelligent FASTA/Q de/interleaving '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
-from collections import namedtuple
-from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdin, stderr, stdout
-
-try:
-    from itertools import zip_longest as zl
-except:
-    from itertools import izip_longest as zl  # Py2
-
-
-# Globals #####################################################################
-
+from sys import stderr, stdin, stdout
+from typing import Iterator, NamedTuple, TextIO
 
 signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
-
-# data structures
-seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
 
 
 # Classes #####################################################################
 
 
+class SeqRecord(NamedTuple):
+    ''' A class for holding sequence data '''
+    seqid: str
+    seq: str
+    quals: str = ''
+
+    def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
+        ''' Print a sequence as FASTA/Q '''
+        if self.quals:
+            print(f'@{self.seqid}\n{self.seq}\n+\n{self.quals}', file=fileobj)
+        elif wrap:
+            print(f'>{self.seqid}', file=fileobj)
+            for g in grouper(self.seq, wrap):
+                print(g, file=fileobj)
+        else:
+            print(f'>{self.seqid}\n{self.seq}', file=fileobj)
+
+
 class MultiReader(object):
     ''' A class for reading FASTA/Q records '''
 
-    def __init__(self, inputstream):
+    def __init__(self, inputstream: TextIO, replaceU: bool=False):
         self._fileobj = inputstream
         self._buffer = ' '
+        self.replaceU = replaceU
 
     def __enter__(self):
         return self
@@ -46,49 +51,51 @@ class MultiReader(object):
     def __iter__(self):
         return self
 
-    def __next__(self):
+    def __next__(self) -> SeqRecord:
         while self._buffer and self._buffer[0] not in ('>', '@'):
             self._buffer = self._fileobj.readline()
         if not self._buffer:
             raise StopIteration
-        if self._buffer[0] == ">":
-            seqid = self._buffer[1:].strip()
+        if self._buffer.startswith('>'):
+            seqid = self._buffer[1:].strip('\r\n')
             self._buffer = self._fileobj.readline()
             seqlines = []
             while self._buffer and self._buffer[0] not in ('>', '@'):
-                seqlines.append(self._buffer.strip())
+                seqlines.append(self._buffer.strip('\r\n'))
                 self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, ''.join(seqlines).upper(), '')
-        else:
-            seqid = self._buffer[1:].strip()
-            seq = self._fileobj.readline().strip().upper()
+            if not (seq := ''.join(seqlines)):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq)
+        else:  # self._buffer.startswith('@')
+            seqid = self._buffer[1:].strip('\r\n')
+            seq = self._fileobj.readline().strip('\r\n')
             self._fileobj.readline()
-            quals = self._fileobj.readline().strip()
+            quals = self._fileobj.readline().strip('\r\n')
             self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, seq, quals)
-
-    next = __next__  # Py2 compatibility
+            if not (seq and quals):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq, quals)
 
 
 # Functions ###################################################################
 
 
-def grouper(iterable, k):
-    ''' Yield a memory-mapped iterable in chunks of `k` '''
-    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+def grouper(iterable: Iterator, k: int) -> Iterator[Iterator]:
+    ''' Yield a memory-mapped `iterable` in chunks of `k`
+    !!! If iterable % k != 0 the length of the last chunk will be <k !!! '''
+    for i in range(len(iterable) // k + (1 if len(iterable) % k else 0)):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(seqid, seq, quals='', fileobj=stdout):
-    ''' Appropraitely prints a sequence '''
-    if quals:
-        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
-    elif 'wrap' not in args:
-        print('>{}\n{}'.format(seqid, seq), file=fileobj)
-    else:
-        print('>{}'.format(seqid), file=fileobj)
-        for chunk in grouper(seq, args.wrap):
-            print(chunk, file=fileobj)
+def get_uniform_id(seqid: str) -> str:
+    ''' Strip Illumina reads of their pairing information '''
+    return seqid.replace('/', ' ').split()[0]
 
 
 ###############################################################################
@@ -97,72 +104,52 @@ def printseq(seqid, seq, quals='', fileobj=stdout):
 if __name__ == '__main__':
 
     parser = ArgumentParser(
-        description='intelligent FASTA/Q interleaving',
+        description='intelligent FASTA/Q de/interleaving',
         argument_default=SUPPRESS)
     parser.add_argument(
-        '-u', dest='unpaired', nargs='*', type=FileType('r'),
-        help='Unpaired input file(s) (use "-" or leave blank for stdin)')
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='Unordered input file(s) containing reads to interleave (use "-" or \
+        leave blank for stdin)')
     parser.add_argument(
-        '-1', dest='firstread', nargs='*', type=FileType('r'),
-        help='First read file(s)')
+        '-v', '--inverse', nargs=2, type=FileType('w'),
+        help='Deinterleave the input into two files')
     parser.add_argument(
-        '-2', dest='secondread', nargs='*', type=FileType('r'),
-        help='Second read file(s)')
-    parser.add_argument(
-        '-w', '--wrap', nargs='?', type=int, const=80,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        '-w', '--wrap', nargs='?', type=int, const=80, default=0,
+        help='Wrap lines at `w` when outputting FASTA (%(const)s when \
         supplied alone)')
+    parser.add_argument(
+        '-q', '--quiet', action='store_true', default=False,
+        help='Quiet! Silence reporting to stderr')
     args = parser.parse_args()
 
-    # -u and or both of -1 and -2 are expected
-    # if nothing is provided, assume -u and read stdin
-    if any(k in args for k in ('firstread', 'secondread')):
+    pairs = {}
 
-        if not all(k in args for k in ('firstread', 'secondread')):
-            parser.error('Both `-1` and `-2` must be set together')
-
-        for f1, f2 in zip(args.firstread, args.secondread):
-            brokenpairs = {}
-            with MultiReader(f1) as F1, MultiReader(f2) as F2:
-                for read1, read2 in zl(F1, F2, fillvalue=None):
-                    if read1:
-                        r1id = read1.seqid.split(' ')[0]
-                    if read2:
-                        r2id = read2.seqid.split(' ')[0]
-                    if read1 and read2 and r1id == r2id:
-                        printseq(*read1)
-                        printseq(*read2)
+    for f in args.input:
+        with MultiReader(f) as F:
+            for record in F:
+                uniform_id = get_uniform_id(record.seqid)
+                if pair := pairs.pop(uniform_id, False):
+                    if 'inverse' in args:
+                        if pair.seqid <= record.seqid:
+                            pair.print(args.inverse[0], args.wrap)
+                            record.print(args.inverse[1], args.wrap)
+                        else:
+                            record.print(args.inverse[0], args.wrap)
+                            pair.print(args.inverse[1], args.wrap)
                     else:
-                        if read1:
-                            if r1id in brokenpairs:
-                                printseq(*read1)
-                                printseq(*brokenpairs.pop(r1id))
-                            else:
-                                brokenpairs[r1id] = read1
-                        if read2:
-                            if r2id in brokenpairs:
-                                printseq(*read2)
-                                printseq(*brokenpairs.pop(r2id))
-                            else:
-                                brokenpairs[r2id] = read2
-            if brokenpairs:
-                print('Dropped {} reads from {} and {}'.format(
-                    len(brokenpairs), f1.name, f2.name), file=stderr)
+                        if pair.seqid <= record.seqid:
+                            pair.print(wrap=args.wrap)
+                            record.print(wrap=args.wrap)
+                        else:
+                            record.print(wrap=args.wrap)
+                            pair.print(wrap=args.wrap)
+                else:
+                    pairs[uniform_id] = record
+        f.close()
 
-    elif 'unpaired' not in args:
-        args.unpaired = [stdin]
+    if 'inverse' in args:
+        args.inverse[0].close()
+        args.inverse[1].close()
 
-    if 'unpaired' in args:
-        for f in args.unpaired:
-            brokenpairs = {}
-            with MultiReader(f) as F:
-                for read in F:
-                    rid = read.seqid.split(' ')[0]
-                    if rid in brokenpairs:
-                        printseq(*read)
-                        printseq(*brokenpairs.pop(rid))
-                    else:
-                        brokenpairs[rid] = read
-            if brokenpairs:
-                print('Dropped {} reads from {}'.format(
-                    len(brokenpairs), f.name), file=stderr)
+    if not args.quiet and len(pairs):
+        print(f'{len(pairs)} reads were not paired', file=stderr)
