@@ -4,6 +4,22 @@ A collection of bash wrappers and Python scripts that facilitate working in the 
 
 ---
 
+Requirements: Python >= 3.8
+Support for Python 2 has been dropped moving forward. Changes will be rolled out on a per-script basis.
+
+---
+
+[**`cons`**](cons): intelligent consensus formation
+
+`cons` aims to solve problems deriving accurate consensus data from alignments with uneven depths across their length. This is a frequent problem with alignments of sequences clustered by [`vsearch`](https://github.com/torognes/vsearch), [`usearch`](http://www.drive5.com/usearch/), or [`cd-hit-est`](http://weizhongli-lab.org/cd-hit/). Intuitively, a small region of low depth within a larger region of higher depth is of comparatively less relevance than if the same low depth formed a larger, independent, region at a different position within the alignment, especially towards either end. Normal methods using thresholding approaches will either remove all or include all of these regions, if the threshold is high or low, respectively. `cons` run with `-l/--local` treats the alignment as a time series, and performs changepoint detection to determine localised regions of equivalent depth. These are smoothed (`-s/--smooth`) and a consensus is derived using thresholds appropriate for each region independently. Separately, `cons` will report bases using IUPAC degeneracy codes but will also interpret these codes within alignments and use the appropraite base possibilities when calulating majority rule at the position.
+```bash
+cons [-h] -n NAME [-a [AMBIG]] [-m [MIN]] [-g [GLO]] [-l [LOC]]
+    [-s [SMOOTH]] [-w [WRAP]] [--retaingaps] [--changepoints] [input]
+--- usage examples ---
+cat aligned.fa | cons -n mycons -g -l -s 10 --retaingaps >> aligned.fa
+cat aligned.fa | cons -n mycons -l > aligned.cons
+```
+
 [**`cuti`**](cuti): ordering and selection of columnar data
 ```bash
 cuti [-h] (-n NAMES [NAMES ...] | -f FIELDS) [-d DELIM] [--fill FILL] [input ...]
@@ -12,17 +28,9 @@ cat *.tsv | cuti -f1-2,5,3-4 > merged.tsv
 cuti file.csv -d, -n pvalue > pvalues
 ```
 
-[**`cons`**](cons): intelligent consensus formation
-
-`cons` aims to solve problems deriving accurate consensus data from alignments with uneven depths across their length. This is a frequent problem with alignments of sequences clustered by [`vsearch`](https://github.com/torognes/vsearch), [`usearch`](http://www.drive5.com/usearch/), or [`cd-hit-est`](http://weizhongli-lab.org/cd-hit/). Intuitively, a small region of low depth within a larger region of higher depth is of comparatively less relevance than if the same low depth formed a larger, independent, region at a different position within the alignment. Normal methods using thresholding approaches will either remove all or include all of these regions, if the threshold is high or low, respectively. `cons` run with `-l/--local` treats the alignment as a time series, and performs changepoint detection to determine localised regions of equivalent depth. These are smoothed (`-s/--smooth`) to remove small regions present due to indels, for example, and a consensus is derived using thresholds appropriate for each region independently.
-```bash
-cons [-h] -n NAME [-a [AMBIG]] [-m [MIN]] [-g [GLOB]] [-l [LOCAL]]
-    [-s [SMOOTH]] [-w] [--retaingaps] [--changepoints] [input]
---- usage examples ---
-cat aligned.fa | cons -n mycons -g -l -s 10 > aligned.cons
-```
-
 [**`deinterleave`**](deinterleave): separation of interleaved FASTQ stream data
+
+See also: `interleavei`
 ```bash
 deinterleave [-h] out1 out2
 --- usage examples ---
@@ -70,6 +78,8 @@ samtools view file.bam -f64 \
 ```
 
 [**`interleave`**](interleave): interleaving FASTQ data
+
+See also: `interleavei`
 ```bash
 interleave [-h] in1 in2
 --- usage examples ---
@@ -78,14 +88,18 @@ interleave <(zcat file_1.fq.gz) <(zcat file_2.fq.gz) | pigz > interleaved.fq.gz
 ```
 
 [**`interleavei`**](interleavei): intelligent FASTA/Q interleaving
+
+Interleaves FASTA/Q data where both reads of a pair are not guaranteed to be present or supplied in the correct order. Alternatively, when run with `-v`, deinterleaves scrambled reads into ordered, paired, files.
 ```bash
-interleavei [-h] [-u [UNPAIRED ...]] [-1 [FIRSTREAD ...]] [-2 [SECONDREAD ...]] [-w [WRAP]]
+interleavei [-h] [-v INVERSE INVERSE] [-w [WRAP]] [-q] [input [input ...]]
 --- usage examples ---
-samtools fastq -n file.bam | interleavei -u | deinterleave file_1.fq file_2.fq
-interleavei -1 file_1.fa -2 <(zcat file_2.fa.gz) -w | pigz > interleaved.fa.gz
+interleavei file_1.fa <(zcat file_2.fa.gz) | pigz > interleaved.fa.gz
+samtools fastq -n file.bam | interleavei -v file_1.fq file_2.fq
 ```
 
 [**`linearise`**](linearise): FASTA/Q <-> TSV conversion
+
+Conversion of FASTA/Q data to and from a columnar format to facilitate common terminal workflows.
 ```bash
 linearise [-h] [-v] [-w [WRAP]] [input ...]
 --- usage examples ---
@@ -99,8 +113,6 @@ cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 ```bash
 mutator [-h] -c CYCLES [CYCLES ...] [-s [SUBSTITUTION]] [-i [INSERTION]] [-d [DELETION]]
     [-r REPLICATES] [-l INDELLENGTH] [-w [WRAP]] [--verbose] [input ...]
---- requirements ---
-Python >= 3.6
 --- usage examples ---
 cat file.fa | mutator -c $(seq -s" " 25000 25000 10000000) -r 100 > mutated.fa
 mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
@@ -108,9 +120,10 @@ mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
 
 [**`orf_scanner`**](orf_scanner): robust CDS prediction
 
-`orf_scanner` outputs ORFs (or as AAs with `-t/--translate`) or their positions (`--gff3`) derived from input sequences. With `-m/--model`, `orf_scanner` will build a hexamer model using supplied validated data (e.g. Ensembl CDSes) and output only ORFs that contain suitable hexamers.
+`orf_scanner` outputs CDS predictions from input sequences. With `-m/--model`, `orf_scanner` scores codon and 3-mer residue usage frequencies for the predicted CDS regions using Markov chains built from supplied validated data (e.g. Ensembl CDS sequences) and outputs only those predictions that fit the profile.
 ```bash
-orf_scanner [-h] [-m [MODEL ...]] [-l MIN_LENGTH] [-s] [-t] [--longest_only] [--gff3] [--verbose] input ...
+orf_scanner [-h] [-m [MODEL [MODEL ...]]] [-l [CDS_LEN] | -p [CDS_LEN]] [--unstranded]
+    [--longest] [--complete] [-w [WRAP]] [-q] [input [input ...]]
 --- usage examples ---
 orf_scanner file.fa -l 100 > file.cds.fa
 orf_scanner file.fa file2.fq -m ensembl_cds.fa --gff3 > cds.gff3
