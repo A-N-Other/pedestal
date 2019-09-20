@@ -1,43 +1,68 @@
 #!/usr/bin/env python
 
-# GY171017
+# GY190919
 
 ''' cons: intelligent consensus formation '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
-from collections import defaultdict as dd, namedtuple
 from bisect import insort
+from collections import defaultdict as dd, namedtuple
+from collections.abc import Iterable
 from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
 from sys import stdin, stdout, stderr
+from typing import Dict, Iterator, NamedTuple, TextIO, Union
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 
 # Globals #####################################################################
 
 
-signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+NUMBER = Union[int, float]
 
-# data structures
-fastarecord = namedtuple('fastarecord', ['seqid', 'seq'])
-depthrange = namedtuple('depthrange', ['start', 'stop', 'depth'])
-
-iupac_codes = {
+IUPAC_NTS_TO_AMBIG = {
     'AG': 'R', 'CT': 'Y', 'CG': 'S', 'AT': 'W', 'GT': 'K', 'AC': 'M',
     'CGT': 'B', 'AGT': 'D', 'ACT': 'H', 'ACG': 'V',
-    'ACGT': 'N', '': 'N'}
+    'ACGT': 'N'}
+IUPAC_AMBIG_TO_NTS = {v: k for k, v in IUPAC_NTS_TO_AMBIG.items()}
 
 
 # Classes #####################################################################
 
 
+class SeqRecord(NamedTuple):
+    ''' A class for holding sequence data '''
+    seqid: str
+    seq: str
+    quals: str = ''
+
+    def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
+        ''' Print a sequence as FASTA/Q '''
+        if self.quals:
+            print(f'@{self.seqid}\n{self.seq}\n+\n{self.quals}', file=fileobj)
+        elif wrap:
+            print(f'>{self.seqid}', file=fileobj)
+            for g in grouper(self.seq, wrap):
+                print(g, file=fileobj)
+        else:
+            print(f'>{self.seqid}\n{self.seq}', file=fileobj)
+
+
+class DepthRange(NamedTuple):
+    start: int
+    stop: int
+    depth: int
+
+
 class FastaReader(object):
     ''' A class for reading FASTA records'''
 
-    def __init__(self, inputstream):
+    def __init__(self, inputstream, replaceU: bool=False):
         self._fileobj = inputstream
         self._buffer = self._fileobj.readline()
+        self.replaceU = replaceU
 
     def __enter__(self):
         return self
@@ -48,73 +73,74 @@ class FastaReader(object):
     def __iter__(self):
         return self
 
-    def __next__(self):
+    def __next__(self) -> SeqRecord:
         while self._buffer and not self._buffer.startswith('>'):
             self._buffer = self._fileobj.readline()
         if not self._buffer:
             raise StopIteration
-        seqid = self._buffer[1:].strip().split(' ')[0]
-        seqlines = []
+        seqid = self._buffer[1:].strip('\r\n')
         self._buffer = self._fileobj.readline()
+        seqlines = []
         while self._buffer and not self._buffer.startswith('>'):
-            seqlines.append(self._buffer.strip())
+            seqlines.append(self._buffer.strip('\r\n'))
             self._buffer = self._fileobj.readline()
-        return fastarecord(seqid, ''.join(seqlines).upper())
-
-    next = __next__
+        seq = ''.join(seqlines).upper()
+        if self.replaceU:
+            seq = seq.replace('U', 'T')
+        return SeqRecord(seqid, seq)
 
 
 class RunningMedian(object):
 
-    def __init__(self):
-        self._lows = []
-        self._highs = []
-
-    def __call__(self, n):
-        n = float(n)
-        if not self._lows or n < max(self._lows):
-            insort(self._lows, n)
-            if len(self._lows) - len(self._highs) > 1:
-                self._highs = [self._lows.pop()] + self._highs
+    def __init__(self, values: Union[NUMBER, Iterator[NUMBER]]=[]):
+        if isinstance(values, Iterable):
+            self.values = sorted(values)
         else:
-            insort(self._highs, n)
-            if len(self._highs) - len(self._lows) > 1:
-                self._lows.append(self._highs.pop(0))
-        return self.median()
+            self.values = [values]
+        self.median = self._median() if self.values else 0
 
-    def median(self):
-        if len(self._lows) == len(self._highs):
-            return (self._lows[-1] + self._highs[0]) / 2.0
-        elif len(self._lows) > len(self._highs):
-            return self._lows[-1]
-        # else implied
-        return self._highs[0]
+    def __str__(self):
+        return str(self.median)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def _median(self) -> NUMBER:
+        ''' Return the median '''
+        if len(self.values) & 1:
+            return self.values[len(self.values)//2]
+        return (self.values[len(self.values)//2-1] + \
+            self.values[len(self.values)//2]) / 2
+
+    def update(self, values: Union[NUMBER, Iterator[NUMBER]]) -> None:
+        if isinstance(values, Iterable):
+            for v in values:
+                insort(self.values, v)
+        else:
+            insort(self.values, values)
+        self.median = self._median()
 
 
 # Functions ###################################################################
 
 
-def median(x):
-    ''' Return the median '''
-    x = sorted(x)
-    if len(x) & 1:
-        return float(x[len(x)//2])
-    # else implied
-    return sum(x[len(x)//2-1:len(x)//2+1]) / 2.0
-
-
-def consensus_base(base, iupac=False):
+def consensus_base(base: Dict[str, int], iupac: bool=False) -> str:
     ''' Decide the consensus at a base position '''
 
-    try:
+    if '-' in base:
         del(base['-'])
-    except KeyError:
-        pass
-    if not base:
-        return '-'  # Return gap-only
-    elif len(base) == 1:
+        if not base:  # Return gap only
+            return '-'
+    if len(base) == 1:
         return base.popitem()[0]  # Return unambiguous
-    nts = sorted([(k, v) for k, v in base.items()],
+    nts = {'A': 0, 'C': 0, 'G': 0, 'T': 0}
+    for k, v in base.items():
+        try:  # Standard base
+            nts[k] += v
+        except:  # IUPAC ambiguous base
+            for nt in IUPAC_AMBIG_TO_NTS[k]:
+                nts[nt] += v
+    nts = sorted([(k, v) for k, v in nts.items()],
         key=lambda x: x[1], reverse=True)
     if not iupac:
         nts = [nt for nt in nts if nt[1] == nts[0][1]]
@@ -122,28 +148,29 @@ def consensus_base(base, iupac=False):
             return nts[0][0]  # Return majority
         return 'N'  # Return majority indecision
     else:
-        nts = [nt for nt in nts if nt[1] >= float(nts[0][1]) / 2]
+        nts = [nt for nt in nts if nt[1] >= (nts[0][1] * iupac)]
         if len(nts) == 1:
             return nts[0][0]  # Return majority
-        return iupac_codes[''.join(sorted([nt[0] for nt in nts if nt[0] in 'ATCG']))]  # Return iupac indecision
+        return IUPAC_NTS_TO_AMBIG[''.join(sorted([nt[0] for nt in nts]))]  # Return iupac indecision
 
 
-def grouper(iterable, k):
-    ''' Yield a memory-mapped iterable in chunks of `k` '''
-    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+def grouper(iterable: Iterator, k: int) -> Iterator[Iterator]:
+    ''' Yield a memory-mapped `iterable` in chunks of `k`
+    !!! If iterable % k != 0 the length of the last chunk will be <k !!! '''
+    for i in range(len(iterable) // k + (1 if len(iterable) % k else 0)):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(seqid, seq, quals='', fileobj=stdout):
+def printseq(seqid: str, seq: str, quals: str='', wrap: int=0, fileobj: TextIO=stdout) -> None:
     ''' Appropraitely prints a sequence '''
     if quals:
-        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
-    elif 'wrap' not in args:
-        print('>{}\n{}'.format(seqid, seq), file=fileobj)
-    else:
-        print('>{}'.format(seqid), file=fileobj)
-        for chunk in grouper(seq, args.wrap):
+        print(f'@{seqid}\n{seq}\n+\n{quals}', file=fileobj)
+    elif wrap:
+        print(f'>{seqid}', file=fileobj)
+        for chunk in grouper(seq, wrap):
             print(chunk, file=fileobj)
+    else:
+        print(f'>{seqid}\n{seq}', file=fileobj)
 
 
 ###############################################################################
@@ -167,100 +194,102 @@ if __name__ == '__main__':
         position (default %(const)s)')
     parser.add_argument(
         '-m', '--min', default=2, nargs='?', type=int,
-        help='Only ever include sites >= depth `m` (default %(default)s)')
+        help='Only ever report sites >= depth `m` (default %(default)s)')
     parser.add_argument(
-        '-g', '--glob', const=0.2, nargs='?', type=float,
-        help='The per-site required alignment depth must be >= \
-        max(`g`*totaldepth, `m`) (default %(const)s)')
+        '-g', '--glo', const=0.2, nargs='?', type=float,
+        help='(Exdends `m`) Per-site depth must be >= this proportion of the \
+        deepest position within the alignment (%(const)s) when supplied alone)')
     parser.add_argument(
         '-l', '--loc', const=0.5, nargs='?', type=float,
-        help='The per-site required alignment depth is calculated in \
-        comparison to its local region, and must be >= \
-        max(`l`*localdepth, `m`) (default %(const)s). When combined with `g`, \
-        the calculated local depth must also be >= `g`*totaldepth')
+        help='(Extends `m`) Per-site depth must be >= this proportion of the \
+        local alignment depth (see `s`) (%(const)s when supplied alone)')
     parser.add_argument(
-        '-s', '--smooth', default=50, nargs='?', type=float,
-        help='Minimum size (nts) of local areas for use with `-l` \
-        (default %(default)s)')
+        '-s', '--smooth', default=50, nargs='?', type=int,
+        help='Size of local areas for use with `-l` (default %(default)s)')
     parser.add_argument(
-        '-w', '--wrap', nargs='?', type=int, const=80,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        '-w', '--wrap', nargs='?', type=int, const=80, default=0,
+        help='Wrap lines at `w` when outputting FASTA (%(const)s when \
         supplied alone)')
     parser.add_argument(
-        '--retaingaps', action='store_true',
+        '--retaingaps', action='store_true', default=False,
         help='Retain gap characters in consensus (useful for comparing to \
         original alignment)')
     parser.add_argument(
-        '--changepoints', action='store_true',
+        '--changepoints', action='store_true', default=False,
         help='Print the changepoints detected with `-l` to stderr (start, \
         stop, median depth)')
     args = parser.parse_args()
 
-    with FastaReader(args.input) as F:
+    with FastaReader(args.input, True) as F:
         for i, record in enumerate(F):
             if not i:
                 aln = [dd(int) for _ in range(len(record.seq))]
             for j, base in enumerate(record.seq):
                 aln[j][base] += 1
+    args.input.close()
 
     totaldepth = i + 1
+    maxdepth = max(totaldepth - base.get('-', 0) for base in aln)
 
-    if not 'loc' in args:
+    if 'loc' not in args:
 
-        depth_req = totaldepth - max(args.min,
-            ceil(args.glob * totaldepth) if 'glob' in args else 0)
+        depth_req = max(args.min, ceil(args.glo * maxdepth) if 'glo' in args else 0)
         cons = [consensus_base(base, args.ambig if 'ambig' in args else False)
-            if base.get('-', 0) <= depth_req else '-' for base in aln]
+            if totaldepth - base.get('-', 0) >= depth_req else '-' for base in aln]
 
     else:
 
-        depths = [sum(v for k, v in base.items() if k != '-') for base in aln]
-        changes, m = [], 0
-        med = RunningMedian()
-        for i, depth in enumerate(depths):
-            # Changepoint if depth differs from the running median +- slop
-            if not m * 0.9 < depth < m * 1.1:
-                changes.append(i)
-                # Reset the running median
-                med = RunningMedian()
-            m = med(depth)
-        changes.append(len(aln))
-
-        # Smooth the changepoints
-        _changes = [depthrange(changes[0], changes[1],
-            median(depths[changes[0]:changes[1]]))]
-        for i, c in enumerate(changes[1:-1], 1):
-            region_depth = median(depths[c:changes[i+1]])
-            # If the depths are equivalent, extend previous
-            if _changes[-1].depth * 0.9 <= region_depth <= _changes[-1].depth * 1.1:
-                _changes[-1] = _changes[-1]._replace(
-                    stop=changes[i+1],
-                    depth=median(depths[_changes[-1].start:changes[i+1]]))
-            # Else if the depth decreases then filter on size
-            elif region_depth < _changes[-1].depth and changes[i+1] - c < args.smooth:
-                _changes[-1] = _changes[-1]._replace(
-                    stop=changes[i+1],
-                    depth=median(depths[_changes[-1].start:changes[i+1]]))
-            # Else allow the changepoint
+        ranges = []
+        depthsequence = []
+        start = 0
+        rm = RunningMedian(sum(v for k, v in aln[0].items() if k != '-'))
+        for i, base in enumerate(aln[1:], 1):
+            base_depth = sum(v for k, v in base.items() if k != '-')
+            # Changepoint if depth differs from the running median +- 10% slop
+            if rm.median * 0.9 < base_depth < rm.median * 1.1:
+                rm.update(base_depth)
             else:
-                _changes.append(depthrange(
-                    c, changes[i+1], region_depth))
-        changes = _changes
+                ranges.append(DepthRange(start, i-1, rm))
+                depthsequence += [rm.median] * (i - start)
+                start = i
+                rm = RunningMedian(base_depth)
+        ranges.append(DepthRange(start, i, rm))
 
-        if 'changepoints' in args:
-            for c in changes:
-                print(*c, file=stderr)
+        _ranges = [ranges[0]]
+        for dr in ranges[1:]:
+            # Next range is within slop - extend previous
+            if _ranges[-1].depth.median * 0.9 <= dr.depth.median <= _ranges[-1].depth.median * 1.1:
+                _ranges[-1] = _ranges[-1]._replace(stop=dr.stop)
+                _ranges[-1].depth.update(dr.depth.values)
+            # Next range is deeper - allow through
+            elif dr.depth.median > _ranges[-1].depth.median:
+                _ranges.append(dr)
+            # Next range is shallower ...
+            # Do we return to a higher depth within smoothing window?
+            else:
+                smoothing_range = depthsequence[dr.start:dr.start+args.smooth]
+                if len(smoothing_range) != args.smooth:
+                    _ranges[-1] = _ranges[-1]._replace(stop=dr.stop)
+                    continue
+                # We return to current range within slop or to a deeper range - extend previous
+                if max(smoothing_range) > _ranges[-1].depth.median * 0.9:
+                    _ranges[-1] = _ranges[-1]._replace(stop=dr.stop)
+                # The depth drop is longer than the smoothing window - allow change
+                else:
+                    _ranges.append(dr)
+        ranges = _ranges
+
+        if args.changepoints:
+            for dr in ranges:
+                print(*dr, file=stderr)
 
         cons = []
-        for region in changes:
-            if 'glob' in args and region.depth < totaldepth * args.glob:
-                cons += ['-' for base in aln[region.start:region.stop]]
-                continue
-            # else implied
-            depth_req = totaldepth - max(args.min, ceil(args.loc * region.depth))
+        for dr in ranges:
+            depth_req = maxdepth - max(args.min, ceil(args.loc * dr.depth.median),
+                ceil(args.glo * maxdepth) if 'glo' in args else 0)
             cons += [consensus_base(base, args.ambig if 'ambig' in args else False)
-                if base.get('-', 0) <= depth_req else '-' for base in aln[region.start:region.stop]]
+                if base.get('-', 0) <= depth_req else '-' for base in aln[dr.start:dr.stop+1]]
 
-    if 'retaingaps' not in args:
+    if not args.retaingaps:
         cons = [base for base in cons if base != '-']
-    printseq(args.name, ''.join(cons))
+    printseq(args.name, ''.join(cons), wrap=args.wrap)
