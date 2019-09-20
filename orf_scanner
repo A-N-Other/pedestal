@@ -1,73 +1,84 @@
 #!/usr/bin/env python
 
-# GY171017
+# GY190919
 
 ''' orf_scanner: robust CDS prediction '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
-from collections import namedtuple
+from collections import defaultdict as dd
+from copy import deepcopy
 from itertools import product
 import logging
-from math import log10, ceil
-from random import choice
+from math import ceil, log
+from random import sample
 import re
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdout
+from sys import stdin, stdout
+from typing import Iterator, NamedTuple, TextIO
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 
 # Globals #####################################################################
 
 
-signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+NUCL_COMP = str.maketrans('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
 
-# translation pattern for reverse-complement
-trans = ('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
-try:
-    _acgt_comp = str.maketrans(*trans)
-except AttributeError:
-    from string import maketrans  # Py2
-    _acgt_comp = maketrans(*trans)
-
-_aa_translate = {'TTT': 'F', 'TTC': 'F', 'TCT': 'S', 'TCC': 'S',
-                 'TAT': 'Y', 'TAC': 'Y', 'TGT': 'C', 'TGC': 'C',
-                 'TTA': 'L', 'TCA': 'S', 'TAA': '*', 'TGA': '*',
-                 'TTG': 'L', 'TCG': 'S', 'TAG': '*', 'TGG': 'W',
-                 'CCC': 'P', 'CTT': 'L', 'CTC': 'L', 'CCT': 'P',
-                 'CCC': 'P', 'CAC': 'H', 'CGC': 'R', 'CAT': 'H',
-                 'CAC': 'H', 'CGT': 'R', 'CGC': 'R', 'CCA': 'P',
-                 'CCG': 'P', 'CTA': 'L', 'CTG': 'L', 'CCA': 'P',
-                 'CCG': 'P', 'CAA': 'Q', 'CAG': 'Q', 'CGA': 'R',
-                 'CGG': 'R', 'CAA': 'Q', 'CAG': 'Q', 'CGA': 'R',
-                 'CGG': 'R', 'ACC': 'T', 'ATT': 'I', 'ATC': 'I',
-                 'ACT': 'T', 'ACC': 'T', 'AAC': 'N', 'AGC': 'S',
-                 'AAT': 'N', 'AAC': 'N', 'AGT': 'S', 'AGC': 'S',
-                 'ACA': 'T', 'AAA': 'K', 'AGA': 'R', 'ATA': 'I',
-                 'ACA': 'T', 'AAA': 'K', 'AGA': 'R', 'ACG': 'T',
-                 'AAG': 'K', 'AGG': 'R', 'ATG': 'M', 'ACG': 'T',
-                 'AAG': 'K', 'AGG': 'R', 'GCC': 'A', 'GTT': 'V',
-                 'GTC': 'V', 'GCT': 'A', 'GCC': 'A', 'GAC': 'D',
-                 'GGC': 'G', 'GAT': 'D', 'GAC': 'D', 'GGT': 'G',
-                 'GGC': 'G', 'GCA': 'A', 'GCG': 'A', 'GTA': 'V',
-                 'GTG': 'V', 'GCA': 'A', 'GCG': 'A', 'GAA': 'E',
-                 'GAG': 'E', 'GGA': 'G', 'GGG': 'G', 'GAA': 'E',
-                 'GAG': 'E', 'GGA': 'G', 'GGG': 'G'}
-
-# data structures
-seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
-orfrecord = namedtuple('orfrecord', ['frame', 'start', 'end', 'seq'])
+CODON_MAP = {
+    'TTT': 'F', 'TTC': 'F', 'TCT': 'S', 'TCC': 'S',
+    'TAT': 'Y', 'TAC': 'Y', 'TGT': 'C', 'TGC': 'C',
+    'TTA': 'L', 'TCA': 'S', 'TAA': '*', 'TGA': '*',
+    'TTG': 'L', 'TCG': 'S', 'TAG': '*', 'TGG': 'W',
+    'CCC': 'P', 'CTT': 'L', 'CTC': 'L', 'CCT': 'P',
+    'CCC': 'P', 'CAC': 'H', 'CGC': 'R', 'CAT': 'H',
+    'CAC': 'H', 'CGT': 'R', 'CGC': 'R', 'CCA': 'P',
+    'CCG': 'P', 'CTA': 'L', 'CTG': 'L', 'CCA': 'P',
+    'CCG': 'P', 'CAA': 'Q', 'CAG': 'Q', 'CGA': 'R',
+    'CGG': 'R', 'CAA': 'Q', 'CAG': 'Q', 'CGA': 'R',
+    'CGG': 'R', 'ACC': 'T', 'ATT': 'I', 'ATC': 'I',
+    'ACT': 'T', 'ACC': 'T', 'AAC': 'N', 'AGC': 'S',
+    'AAT': 'N', 'AAC': 'N', 'AGT': 'S', 'AGC': 'S',
+    'ACA': 'T', 'AAA': 'K', 'AGA': 'R', 'ATA': 'I',
+    'ACA': 'T', 'AAA': 'K', 'AGA': 'R', 'ACG': 'T',
+    'AAG': 'K', 'AGG': 'R', 'ATG': 'M', 'ACG': 'T',
+    'AAG': 'K', 'AGG': 'R', 'GCC': 'A', 'GTT': 'V',
+    'GTC': 'V', 'GCT': 'A', 'GCC': 'A', 'GAC': 'D',
+    'GGC': 'G', 'GAT': 'D', 'GAC': 'D', 'GGT': 'G',
+    'GGC': 'G', 'GCA': 'A', 'GCG': 'A', 'GTA': 'V',
+    'GTG': 'V', 'GCA': 'A', 'GCG': 'A', 'GAA': 'E',
+    'GAG': 'E', 'GGA': 'G', 'GGG': 'G', 'GAA': 'E',
+    'GAG': 'E', 'GGA': 'G', 'GGG': 'G'}
 
 
 # Classes #####################################################################
 
 
+class SeqRecord(NamedTuple):
+    ''' A class for holding sequence data '''
+    seqid: str
+    seq: str
+    quals: str = ''
+
+    def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
+        ''' Print a sequence as FASTA/Q '''
+        if self.quals:
+            print(f'@{self.seqid}\n{self.seq}\n+\n{self.quals}', file=fileobj)
+        elif wrap:
+            print(f'>{self.seqid}', file=fileobj)
+            for g in grouper(self.seq, wrap):
+                print(g, file=fileobj)
+        else:
+            print(f'>{self.seqid}\n{self.seq}', file=fileobj)
+
+
 class MultiReader(object):
     ''' A class for reading FASTA/Q records '''
 
-    def __init__(self, inputstream):
+    def __init__(self, inputstream: TextIO, replaceU: bool=False):
         self._fileobj = inputstream
         self._buffer = ' '
+        self.replaceU = replaceU
 
     def __enter__(self):
         return self
@@ -78,115 +89,82 @@ class MultiReader(object):
     def __iter__(self):
         return self
 
-    def __next__(self):
+    def __next__(self) -> SeqRecord:
         while self._buffer and self._buffer[0] not in ('>', '@'):
             self._buffer = self._fileobj.readline()
         if not self._buffer:
             raise StopIteration
-        if self._buffer[0] == ">":
-            seqid = self._buffer[1:].strip()
+        if self._buffer.startswith('>'):
+            seqid = self._buffer[1:].strip('\r\n')
             self._buffer = self._fileobj.readline()
             seqlines = []
             while self._buffer and self._buffer[0] not in ('>', '@'):
-                seqlines.append(self._buffer.strip())
+                seqlines.append(self._buffer.strip('\r\n'))
                 self._buffer = self._fileobj.readline()
-            return seqrecord(
-                seqid, ''.join(seqlines).upper().replace('U', 'T'), '')
-        else:
-            seqid = self._buffer[1:].strip()
-            seq = self._fileobj.readline().strip().upper()
+            if not (seq := ''.join(seqlines)):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq)
+        else:  # self._buffer.startswith('@')
+            seqid = self._buffer[1:].strip('\r\n')
+            seq = self._fileobj.readline().strip('\r\n')
             self._fileobj.readline()
-            quals = self._fileobj.readline().strip()
+            quals = self._fileobj.readline().strip('\r\n')
             self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, seq.replace('U', 'T'), quals)
-
-    next = __next__  # Py2 compatibility
+            if not (seq and quals):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq, quals)
 
 
 # Functions ###################################################################
 
 
-def iterkmers(iterable, k, step=1):
-    ''' Yield all possible kmers of length k from a memory-mapped iterable '''
+def iterkmers(iterable: Iterator, k: int, step: int=1) -> Iterator[Iterator]:
+    ''' Yield all possible kmers of length `k` from a memory-mapped `iterable`
+    !!! Sequence will be truncated if iterable % k != 0 !!! '''
     for i in range(0, len(iterable)-k+1, step):
         yield iterable[i:i+k]
 
 
-def rcomp(record):
-    ''' Reverse complement a seqrecord '''
-    return record._replace(
-        seq=record.seq[::-1].translate(_acgt_comp),
-        quals=record.quals[::-1])
-
-
-def find_orfs(record, pattern, longest_only=False, sense_only=False):
-    ''' Search all frames (0 -> 5) for ORFs using the provided regex '''
-
-    def _orf_generator(seq, offset):
-        ''' Yield ORFs from a specified frame (0 -> 2) '''
-        m = pattern.match(seq, offset)
-        while m:
-            yield orfrecord(m.start(1)%3, m.start(1), m.end(1), m.group(1))
-            m = pattern.match(seq, m.end())
-
-    orfs = []
-    for offset in (0, 1, 2):
-        orfs += [orf for orf in _orf_generator(record.seq, offset)]
-    if not sense_only:
-        record = rcomp(record)
-        for offset in (0, 1, 2):
-            orfs += [orfrecord(orf.frame+3, orf.start, orf.end, orf.seq)
-                for orf in _orf_generator(record.seq, offset)]
-    if orfs and longest_only:
-        return [max(orfs, key=lambda x: x.end - x.start)]
-    return orfs
-
-
-def orf_len(record):
-    ''' The length of an ORF '''
-    return record.end - record.start
-
-
-def score_frames(seq):
-    ''' Score all frames of an ORF '''
-    scores = [
-        sum(hexamers.get(k, 0) for k in iterkmers(seq, 6, 3)),
-        sum(hexamers.get(k, 0) for k in iterkmers(seq[1:]+seq[:1], 6, 3)),
-        sum(hexamers.get(k, 0) for k in iterkmers(seq[2:]+seq[:2], 6, 3))]
-    seq = rcomp(seqrecord('', seq, '')).seq
-    scores += [
-        sum(hexamers.get(k, 0) for k in iterkmers(seq, 6, 3)),
-        sum(hexamers.get(k, 0) for k in iterkmers(seq[1:]+seq[:1], 6, 3)),
-        sum(hexamers.get(k, 0) for k in iterkmers(seq[2:]+seq[:2], 6, 3))]
-    return scores
-
-
-def rand_name(k=16):
-    ''' Random hex string of length `k` '''
-    return ''.join(choice('abcdef0123456789') for i in range(k))  # Py2
-
-
-def aa(seq):
-    ''' Translate DNA '''
-    return ''.join(_aa_translate.get(codon, 'X') for codon in iterkmers(seq, 3, 3))
-
-
-def grouper(iterable, k):
-    ''' Yield a memory-mapped iterable in chunks of `k` '''
-    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+def grouper(iterable: Iterator, k: int) -> Iterator[Iterator]:
+    ''' Yield a memory-mapped `iterable` in chunks of `k`
+    !!! If iterable % k != 0 the length of the last chunk will be <k !!! '''
+    for i in range(len(iterable) // k + (1 if len(iterable) % k else 0)):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(seqid, seq, quals='', fileobj=stdout):
-    ''' Appropraitely prints a sequence '''
-    if quals:
-        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
-    elif 'wrap' not in args:
-        print('>{}\n{}'.format(seqid, seq), file=fileobj)
-    else:
-        print('>{}'.format(seqid), file=fileobj)
-        for chunk in grouper(seq, args.wrap):
-            print(chunk, file=fileobj)
+def fnv1a_64(data: str) -> int:
+    ''' 64-bit Fowler-Noll_Vo 1a hash function '''
+    hval = 0xcbf2_9ce4_8422_2325
+    for c in data:
+        hval = ((hval ^ ord(c)) * 0x100_0000_01b3) % 0x1_0000_0000_0000_0000
+    return hval
+
+
+def find_orfs(record, unstranded: bool=False) -> list:
+    ''' Search all frames (0 -> 5) for ORFs using the provided regex '''
+    matches = {}
+    for m in re.finditer(orf_pattern, record.seq):
+        if (k := (m.end(1), m.start(1)%3)) not in matches:
+            matches[k] = SeqRecord(
+                f'orf{hex(fnv1a_64(m.group(1)))[2:]} ' \
+                f'{record.seqid.split()[0]}:+:{m.start(1)+1}-{m.end(1)+1}',
+                m.group(1),
+                record.quals[m.start(1):m.end(1)])
+    if unstranded:
+        for m in re.finditer(orf_pattern, record.seq[::-1].translate(NUCL_COMP)):
+            if (k := (m.end(1), (m.start(1)%3)+3)) not in matches:
+                matches[k] = SeqRecord(
+                    f'orf{hex(fnv1a_64(m.group(1)))[2:]} ' \
+                    f'{record.seqid.split()[0]}:-:{m.start(1)+1}-{m.end(1)+1}',
+                    m.group(1),
+                    record.quals[m.start(1):m.end(1)])
+    return list(matches.values())
 
 
 ###############################################################################
@@ -199,155 +177,180 @@ if __name__ == '__main__':
     parser = ArgumentParser(
         description='orf_scanner: robust CDS prediction',
         argument_default=SUPPRESS)
+    length_group = parser.add_mutually_exclusive_group()
+
     parser.add_argument(
-        'input', nargs='+', type=FileType('r'),
-        help='FASTA/Q input file(s) (not compatible with streams)')
+        'input', nargs='*', type=FileType('r'), default=[stdin],
+        help='FASTA/Q input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
         '-m', '--model', nargs='*', type=FileType('r'),
-        help='FASTA/Q file(s) of validated, in-frame, sense-oriented CDSes \
-        for hexamer and base-frequency modeling (when supplied with no files, \
-        the longest 1000 ORFs from the `input` are used)')
+        help='FASTA/Q file(s) of validated, in-frame, sense-oriented CDS \
+        sequences for amino acid 3mer and codon frequency modeling')
+    length_group.add_argument(
+        '-l', '--min_length', nargs='?', dest='cds_len', const=100, default='100', type=int,
+        help='Minimum length of CDS regions (default %(default)s AAs)')
+    length_group.add_argument(
+        '-p', '--max_prob', nargs='?', dest='cds_len', const=0.001, type=float,
+        help='Calculate the mimium length of CDS regions to report such that \
+        the probability of a random DNA sequence exceeding this value is <`p` \
+        (%(const)s when supplied alone)')
     parser.add_argument(
-        '-l', '--min_length', default='300', type=int,
-        help='Minimum nucleotide length of ORFs to scan for (default \
-        %(default)s)')
+        '--unstranded', action='store_true', default=False,
+        help='Consider both sense and antisense frames (default behaviour \
+        considers only the sense strand)')
     parser.add_argument(
-        '-s', '--stranded', action='store_true',
-        help='Consider only ORFs from sense frames')
+        '--longest', action='store_true', default=False,
+        help='Report only the longest CDS prediction for each seqeunce')
     parser.add_argument(
-        '-t', '--translate', action='store_true',
-        help='Output peptides in place of nucleotide sequences')
+        '--complete', action='store_true', default=False,
+        help='Report only CDS predictions ending in a stop codon (default \
+        behaviour reports predictions extending 3\' off the seqeunce)')
     parser.add_argument(
-        '-w', '--wrap', nargs='?', type=int, const=80,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        '-w', '--wrap', nargs='?', type=int, const=80, default=0,
+        help='Wrap lines at `w` when outputting FASTA (%(const)s when \
         supplied alone)')
     parser.add_argument(
-        '--longest_only', action='store_true',
-        help='Output only the longest ORF for each input sequence')
-    parser.add_argument(
-        '--gff3', action='store_true',
-        help='Output GFF3 format instead of FASTA sequences')
-    parser.add_argument(
-        '--verbose', action='store_true',
-        help='Report progress and run information')
+        '-q', '--quiet', action='store_true', default=False,
+        help='Quiet! Silence stderr progress reporting')
+
     args = parser.parse_args()
 
-    # Setup logging system ####################################################
+    # Set up logging system ###################################################
 
     logger = logging.getLogger()
     logstream = logging.StreamHandler()
     logstream.setFormatter(logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s', '%y%m%d %H:%M:%S'))
-
-    if 'verbose' in args:
-        loglevel = logging.INFO
-    else:
-        loglevel = logging.ERROR
-
+        '%(asctime)s\t%(message)s', '%y%m%d %H:%M:%S'))
+    loglevel = logging.ERROR if args.quiet else logging.INFO
     logging.basicConfig(level=loglevel, handlers=[logstream])
     logger.info('Started orf_scanner')
 
-    # Generics ################################################################
+    # Set up CDS regex ########################################################
 
-    orf_pattern = re.compile('(?:...)*?(ATG(?:(?!TAA|TGA|TAG)...){' +
-        '{}'.format(args.min_length//3-1) + ',}(?:TAA|TGA|TAG|..$|.$))')
+    if isinstance(args.cds_len, float):
+        vars(args)['cds_len'] = int(ceil(log(args.cds_len/(3/64), 1-(3/64))))
+
+    orf_pattern = re.compile('(?=(ATG(?:(?!TAA|TGA|TAG)...){' +
+        '{}'.format(args.cds_len-1) + ',}(?:TAA|TGA|TAG' +
+        ('' if args.complete else '|..$|.$|$') + ')))')
+
+    logger.info(f'Reporting CDS features >={args.cds_len} residues')
 
     # Build hexamer and nucleotide models #####################################
 
     if 'model' in args:
 
-        hexamers = {''.join(mer):0 for mer in product('ATCG', repeat=6)}
-        bases = {'A': 0, 'T': 0, 'C': 0, 'G': 0}
+        logger.info('Building Markov chains for CDS scoring')
 
-        if args.model:  # use validated CDS regions
-            logger.info('Using ORF models provided')
-            for f in args.model:
-                logger.info('   {}'.format(f.name))
-                with MultiReader(f) as F:
-                    for i, record in enumerate(F, 1):
-                        for kmer in iterkmers(record.seq, k=6, step=3):
-                            try:
-                                hexamers[kmer] += 1
-                            except KeyError:
-                                pass
-                        for k in bases.keys():
-                            bases[k] += record.seq.count(k)
-                logger.info('   {} sequences read'.format(i))
+        # markov chains for AA 3mer usage
+        # aa_chain[XXX] = float
+        aa_chain = dd(float)
+        aa_chain.update({''.join(g): 1.0 for g in
+            product(set(CODON_MAP.values()), repeat=3)})
+        aa_nullchain = deepcopy(aa_chain)
+        # markov chains for codon usage
+        # codon_chain[X][NNN] = float
+        codon_chain = dd(lambda: dd(float))
+        for g in product('ACGT', repeat=3):
+            codon_chain[CODON_MAP.get(g := ''.join(g), 'X')][g] = 1.0
+        codon_nullchain = deepcopy(codon_chain)
 
-        else:  # use the 1000 longest ORFs
-            logger.info('No models provided, finding 1000 longest ORFs')
-            longest_orfs = []
-            for f in args.input:
-                logger.info('... {}'.format(f.name))
-                with MultiReader(f) as F:
-                    for i, record in enumerate(F, 1):
-                        orf = find_orfs(record, orf_pattern, True,
-                            True if 'stranded' in args else False)
-                        if orf and longest_orfs:
-                            for j, item in enumerate(longest_orfs):
-                                if orf_len(orf[0]) > orf_len(item):
-                                    break
-                            longest_orfs[j:j] = orf
-                            if len(longest_orfs) > 1000:
-                                longest_orfs = longest_orfs[1:]
-                        elif orf:
-                            longest_orfs += orf
-                    logger.info('   {} sequences read'.format(i))
-            logger.info('   {} longest ORFs found'.format(len(longest_orfs)))
-            for orf in longest_orfs:
-                for kmer in iterkmers(orf.seq, k=6, step=3):
-                    try:
-                        hexamers[kmer] += 1
-                    except KeyError:
-                        pass
-                for k in bases.keys():
-                    bases[k] += orf.seq.count(k)
+        for f in args.model:
+            logger.info(f'\t{f.name}')
+            with MultiReader(f, replaceU=True) as F:
+                for n_records, record in enumerate(F, 1):
+                    if len(record.seq) < args.cds_len:
+                        continue
+                    # Fill the scores for the true sequences
+                    resis = []
+                    for g in iterkmers(record.seq, 3, 3):
+                            resis.append(resi := CODON_MAP.get(g, 'X'))
+                            codon_chain[resi][g] += 1.0
+                    for g in iterkmers(''.join(resis), 3):
+                        aa_chain[g] += 1
+                    # Fill the nullscores from the scrambled sequences
+                    shuf = ''.join(sample(record.seq, k=len(record.seq)))
+                    resis = []
+                    for g in iterkmers(shuf, 3, 3):
+                            resis.append(resi := CODON_MAP.get(g, 'X'))
+                            codon_nullchain[resi][g] += 1.0
+                    for g in iterkmers(''.join(resis), 3):
+                        aa_nullchain[g] += 1
+            logger.info(f'\t\t{n_records} sequences processed')
+            f.close()
 
-        logger.info('Calculating base and hexamer frequency models')
-        base_sum = float(sum(bases.values()))
-        bases = {k:float(v)/base_sum for k, v in bases.items()}
-        if any(v == 0 for v in hexamers.values()):
-            for k in hexamers.keys():
-                hexamers[k] += 1
-        hex_sum = float(sum(hexamers.values()))
-        hexamers = {k:log10(float(v)/hex_sum/sum(bases[c] for c in k))
-            for k, v in hexamers.items()}
+        # Process the counts into loglikelihoods
+        for k in [k for k in aa_chain.keys() if 'N' in k]:
+            del(aa_chain[k])
+        count = sum(aa_chain.values())
+        for k, v in aa_chain.items():
+            aa_chain[k] = log(v/count, 2)
+
+        for k in [k for k in aa_nullchain.keys() if 'N' in k]:
+            del(aa_nullchain[k])
+        count = sum(aa_nullchain.values())
+        for k, v in aa_nullchain.items():
+            aa_nullchain[k] = log(v/count, 2)
+
+        if 'X' in codon_chain:
+            del(codon_chain['X'])
+        for resi, codons in codon_chain.items():
+            count = sum(codons.values())
+            for k, v in codons.items():
+                codon_chain[resi][k] = log(v/count, 2)
+
+        if 'X' in codon_nullchain:
+            del(codon_nullchain['X'])
+        for resi, codons in codon_nullchain.items():
+            count = sum(codons.values())
+            for k, v in codons.items():
+                codon_nullchain[resi][k] = log(v/count, 2)
 
     # Identify ORFs ###########################################################
 
-    logger.info('Identifying and scoring ORFs')
-    retained, discarded = 0, 0
+    logger.info('Identifying CDS sequences')
+
+    retained = 0
     for f in args.input:
-        logger.info('   {}'.format(f.name))
-        f.seek(0)
-        with MultiReader(f) as F:
-            for i, record in enumerate(F, 1):
-                for j, orf in enumerate(
-                        find_orfs(record, orf_pattern,
-                            True if 'longest_only' in args else False,
-                            True if 'stranded' in args else False), 1):
-                    if 'model' in args:
-                        frame_scores = score_frames(orf.seq)
-                        if frame_scores[0] >= max(frame_scores[1:]):
-                            discarded += 1
-                            continue
-                    start, end = orf.start, orf.end
-                    if orf.frame in (3, 4, 5):
-                        frame = '-'
-                        start, end = len(record.seq)-end, len(record.seq)-start
-                    else:
-                        frame = '+'
-                    start += 1
-                    if 'gff3' in args:
-                        print('{}\torf_scanner\tprotein\t{}\t{}\t.\t{}\t0\t{}'
-                            .format(record.seqid, start, end,
-                                frame, 'ID=prot{}'.format(rand_name())))
-                    else:
-                        printseq('{} orf{}_{}_{}_{}'.format(
-                            record.seqid, j, start, end, frame),
-                            aa(orf.seq) if 'translate' in args else orf.seq)
-                    retained += 1
-        logger.info('   {} sequences read'.format(i))
-    logger.info('{} potential ORFs found'.format(retained))
-    if 'model' in args:
-        logger.info('{} potential ORFs discarded'.format(discarded))
+        logger.info(f'\t{f.name}')
+        with MultiReader(f, replaceU=True) as F:
+            if 'model' in args:
+                for n_records, record in enumerate(F, 1):
+                    cds_regions = []
+                    for cds in find_orfs(record, args.unstranded):
+                        resis = []
+                        codon_score, codon_nullscore = 0.0, 0.0
+                        for g in iterkmers(cds.seq, 3, 3):
+                            resis.append(resi := CODON_MAP.get(g, 'X'))
+                            try:
+                                codon_score += codon_chain[resi][g]
+                                codon_nullscore += codon_nullchain[resi][g]
+                            except KeyError:
+                                pass
+                        aa_score, aa_nullscore = 0.0, 0.0
+                        for g in iterkmers(''.join(resis), 3):
+                            try:
+                                aa_score += aa_chain[g]
+                                aa_nullscore += aa_nullchain[g]
+                            except KeyError:
+                                pass
+                        codon_bitscore = codon_score - codon_nullscore
+                        aa_bitscore = aa_score - aa_nullscore
+                        final_bitscore = (aa_bitscore + codon_bitscore) / len(cds.seq)
+                        if final_bitscore > 0:
+                            cds_regions.append(cds)
+                    if args.longest and cds_regions:
+                        cds_regions = [sorted(cds_regions, key=lambda x: len(x.seq), reverse=True)[0]]
+                    for cds in cds_regions:
+                        retained += 1
+                        cds.print(wrap=args.wrap)
+            else:
+                for record in F:
+                    cds_regions = find_orfs(record, args.unstranded)
+                    if args.longest and cds_regions:
+                        cds_regions = [sorted(cds_regions, key=lambda x: len(x.seq), reverse=True)[0]]
+                    for cds in cds_regions:
+                        retained += 1
+                        cds.print(wrap=args.wrap)
+        f.close()
+        logger.info(f'\t\t{retained} CDS regions predicted from {n_records} sequences')
