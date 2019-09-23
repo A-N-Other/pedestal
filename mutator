@@ -1,53 +1,68 @@
 #!/usr/bin/env python
 
-# GY171017
+# GY190923
 
 ''' mutator: comprehensive DNA mutation simulation '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
-from collections import namedtuple
 import logging
 from math import ceil
-import random
+from random import choice, choices, gauss, randrange, shuffle
 from signal import signal, SIGPIPE, SIG_DFL
-from sys import stdin, stdout, version_info
+from sys import stdin, stdout
+from typing import Iterator, List, NamedTuple, TextIO
 
 
-if not version_info >= (3, 6):
-    raise Exception('Python 3.6 or later is required')
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 
 # Globals #####################################################################
 
 
-signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
+NUCLS = ['A', 'T', 'G', 'C']
+MUT_FREQ = {
+    'A': ['T', 'C', 'G', 'G'],
+    'T': ['A', 'G', 'C', 'C'],
+    'G': ['T', 'C', 'A', 'A'],
+    'C': ['A', 'G', 'T', 'T']}
+for nucl in 'XNRYWSKMDVHB':
+    MUT_FREQ[nucl] = NUCLS
 
-# data structures
-seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
-
-# mutations
-nucleotides = ['A', 'T', 'G', 'C']
-mut_freq = {
-    'A': ['T'] + ['G']*2 + ['C'],
-    'T': ['A'] + ['G'] + ['C']*2,
-    'G': ['A']*2 + ['T'] + ['C'],
-    'C': ['A'] + ['T']*2 + ['G'],
-}
-for c in 'XNRYWSKMDVHB':
-    mut_freq[c] = nucleotides
+INDEL_LEN_FREQ = [float(i)**-1.8797 for i in range(1, 1000)]
 
 
 # Classes #####################################################################
 
 
+class SeqRecord(NamedTuple):
+    ''' A class for holding sequence data '''
+    seqid: str
+    seq: str
+    quals: str = ''
+
+    def __len__(self):
+        return len(self.seq)
+
+    def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
+        ''' Print a sequence as FASTA/Q '''
+        if self.quals:
+            print(f'@{self.seqid}\n{self.seq}\n+\n{self.quals}', file=fileobj)
+        elif wrap:
+            print(f'>{self.seqid}', file=fileobj)
+            for g in grouper(self.seq, wrap):
+                print(g, file=fileobj)
+        else:
+            print(f'>{self.seqid}\n{self.seq}', file=fileobj)
+
+
 class MultiReader(object):
     ''' A class for reading FASTA/Q records '''
 
-    def __init__(self, inputstream):
+    def __init__(self, inputstream: TextIO, replaceU: bool=False):
         self._fileobj = inputstream
         self._buffer = ' '
+        self.replaceU = replaceU
 
     def __enter__(self):
         return self
@@ -58,67 +73,66 @@ class MultiReader(object):
     def __iter__(self):
         return self
 
-    def __next__(self):
+    def __next__(self) -> SeqRecord:
         while self._buffer and self._buffer[0] not in ('>', '@'):
             self._buffer = self._fileobj.readline()
         if not self._buffer:
             raise StopIteration
-        if self._buffer[0] == ">":
-            seqid = self._buffer[1:].strip()
+        if self._buffer.startswith('>'):
+            seqid = self._buffer[1:].strip('\r\n')
             self._buffer = self._fileobj.readline()
             seqlines = []
             while self._buffer and self._buffer[0] not in ('>', '@'):
-                seqlines.append(self._buffer.strip())
+                seqlines.append(self._buffer.strip('\r\n'))
                 self._buffer = self._fileobj.readline()
-            return seqrecord(
-                seqid, ''.join(seqlines).upper().replace('U', 'T'), '')
-        else:
-            seqid = self._buffer[1:].strip()
-            seq = self._fileobj.readline().strip().upper()
+            if not (seq := ''.join(seqlines)):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq)
+        else:  # self._buffer.startswith('@')
+            seqid = self._buffer[1:].strip('\r\n')
+            seq = self._fileobj.readline().strip('\r\n')
             self._fileobj.readline()
-            quals = self._fileobj.readline().strip()
+            quals = self._fileobj.readline().strip('\r\n')
             self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, seq.replace('U', 'T'), quals)
-
-    next = __next__  # Py2 compatibility
+            if not (seq and quals):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq, quals)
 
 
 # Functions ###################################################################
 
 
-def mutate(record, changes):
-    ''' Mutate and return a FASTA record '''
-    seq = list(record.seq)
+def mutate(seq: str, n_sub: int, n_ins: int, n_del: int, indel_length :int) -> str:
+    ''' Mutate and return a nucleotide sequence '''
+    seq = list(seq)
+    changes = ['s']*n_sub + ['i']*n_ins + ['d']*n_del
+    shuffle(changes)
     for change in changes:
-        loc = random.randrange(0, len(seq))
+        loc = randrange(0, len(seq))
         if change == 's':
-            seq[loc] = random.choice(mut_freq[seq[loc]])
+            seq[loc] = choice(MUT_FREQ[seq[loc]])
         else:
-            indel_len = random.choices(
-                [i for i in range(1, len(indel_len_freq)+1)], indel_len_freq)[0]
+            indel_len = choices(
+                [i for i in range(1, indel_length+1)],
+                INDEL_LEN_FREQ[:indel_length])[0]
             if change == 'i':
-                seq[loc+1:loc+1] = random.choices(nucleotides, k=indel_len)
+                seq[loc+1:loc+1] = choices(NUCLS, k=indel_len)
             else:  # change == 'd'
                 seq[loc:loc+indel_len] = []
-    return record._replace(seq=''.join(seq), quals='')
+    return ''.join(seq)
 
 
-def grouper(iterable, k):
-    ''' Yield a memory-mapped iterable in chunks of `k` '''
-    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+def grouper(iterable: Iterator, k: int) -> Iterator[Iterator]:
+    ''' Yield a memory-mapped `iterable` in chunks of `k`
+    !!! If iterable % k != 0 the length of the last chunk will be <k !!! '''
+    for i in range(len(iterable) // k + (1 if len(iterable) % k else 0)):
         yield iterable[i*k:i*k+k]
-
-
-def printseq(seqid, seq, quals='', fileobj=stdout):
-    ''' Appropraitely prints a sequence '''
-    if quals:
-        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
-    elif 'wrap' not in args:
-        print('>{}\n{}'.format(seqid, seq), file=fileobj)
-    else:
-        print('>{}'.format(seqid), file=fileobj)
-        for chunk in grouper(seq, args.wrap):
-            print(chunk, file=fileobj)
 
 
 ###############################################################################
@@ -143,73 +157,83 @@ if __name__ == '__main__':
         'input', nargs='*', type=FileType('r'), default=[stdin],
         help='Input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
-        '-s', '--substitution', default=1.16e-8, nargs='?', type=float,
-        help='Substitution frequency (default %(default)s)')
-    parser.add_argument(
-        '-i', '--insertion', default=2e-10, nargs='?', type=float,
-        help='Insertion frequency (default %(default)s)')
-    parser.add_argument(
-        '-d', '--deletion', default=5.5e-10, nargs='?', type=float,
-        help='Deletion frequency (default %(default)s)')
-    parser.add_argument(
         '-c', '--cycles', required=True, nargs='+', type=int,
         help='Cycle(s) (years/generations/etc) to simulate')
     parser.add_argument(
-        '-r', '--replicates', default=1, type=int,
-        help='Per-sequence replicates required (default %(default)s)')
+        '-s', '--substitution', default=1.16e-8, nargs='?', type=float,
+        help='Substitution frequency (default %(default)s)')
     parser.add_argument(
-        '-l', '--indellength', default=20, type=int,
+        '-i', '--insertion', const=2e-10, default=0, nargs='?', type=float,
+        help='Additionally mutate the input using this insertion frequency \
+        (default %(const)s)')
+    parser.add_argument(
+        '-d', '--deletion', const=5.5e-10, default=0, nargs='?', type=float,
+        help='Additionally mutate the input using this deletion frequency \
+        (default %(const)s)')
+    parser.add_argument(
+        '-r', '--replicates', default=1, type=int,
+        help='Replicates required for each sequence-cycle combination \
+        (default %(default)s)')
+    parser.add_argument(
+        '-l', '--indel_length', default=20, type=int,
         help='Maximum size indel to model (default %(default)s)')
     parser.add_argument(
-        '-w', '--wrap', nargs='?', type=int, const=80,
+        '--sub_sd', default=2.7494273e-9, type=float,
+        help='Standard deviation of the substitution frequency \
+        (default %(default)s)')
+    parser.add_argument(
+        '--ins_sd', default=2.7494273e-11, type=float,
+        help='Standard deviation of the insertion frequency \
+        (default %(default)s)')
+    parser.add_argument(
+        '--del_sd', default=2.7494273e-11, type=float,
+        help='Standard deviation of the deletion frequency \
+        (default %(default)s)')
+    parser.add_argument(
+        '-w', '--wrap', nargs='?', type=int, const=80, default=0,
         help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
         supplied alone)')
     parser.add_argument(
-        '--verbose', action='store_true',
-        help='Report progress and run information')
+        '-q', '--quiet', action='store_true', default=False,
+        help='Quiet! Silence stderr progress reporting')
     args = parser.parse_args()
-
 
     # Setup logging system ####################################################
 
     logger = logging.getLogger()
     logstream = logging.StreamHandler()
     logstream.setFormatter(logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s', '%y%m%d %H:%M:%S'))
-
-    if 'verbose' in args:
-        loglevel = logging.INFO
-    else:
-        loglevel = logging.ERROR
-
+        '%(asctime)s\t%(message)s', '%y%m%d %H:%M:%S'))
+    loglevel = logging.ERROR if args.quiet else logging.INFO
     logging.basicConfig(level=loglevel, handlers=[logstream])
 
-    # Generics ################################################################
-
-    indel_len_freq = [float(i)**-1.8797 for i in range(1, args.indellength+1)]
+    logger.info('Started mutator')
+    logger.info('\tsubstitution rate = {}'.format(args.substitution))
+    logger.info('\tinsertion rate = {}'.format(args.insertion))
+    logger.info('\tdeletion rate = {}'.format(args.deletion))
+    logger.info('\tmax indel length = {}'.format(args.indel_length))
 
     ###########################################################################
 
-    logger.info('Started mutator')
-    logger.info('  substitution rate = {}'.format(args.substitution))
-    logger.info('  insertion rate = {}'.format(args.insertion))
-    logger.info('  deletion rate = {}'.format(args.deletion))
-    if args.insertion or args.deletion:
-        logger.info('  max indel length = {}'.format(args.indellength))
+    args.cycles = sorted(args.cycles)
+
+    # Parse and mutate input sequences ########################################
 
     for f in args.input:
         with MultiReader(f) as F:
-            for i, record in enumerate(F, 1):
+            for record in F:
                 logger.info('Mutating {}'.format(record.seqid))
-                for c in sorted(args.cycles):
-                    # Number of changes for `c` cycles across the record length
-                    n_changes = int(ceil(len(record.seq) * c *
-                        (args.substitution + args.insertion + args.deletion)))
+                for c in args.cycles:
                     for r in range(1, args.replicates+1):
-                        _record = mutate(
-                            record, random.choices('sid', k=n_changes,
-                            weights=[args.substitution, args.insertion, args.deletion]))
-                        printseq('{} cycle:{} replicate:{}'.format(
-                            _record.seqid, c, r), _record.seq, _record.quals)
-
+                        n_sub = round(gauss(args.substitution, args.sub_sd) *
+                            c * len(record))
+                        n_ins = round(gauss(args.insertion, args.ins_sd) *
+                            c * len(record)) if args.insertion else 0
+                        n_del = round(gauss(args.deletion, args.del_sd) *
+                            c * len(record)) if args.deletion else 0
+                        _record = SeqRecord(
+                            f'{record.seqid} cycle:{c} replicate:{r} n_sub:{n_sub} n_ins:{n_ins} n_del:{n_del}',
+                            mutate(record.seq, n_sub, n_ins, n_del, args.indel_length))
+                        _record.print()
+        f.close()
     logger.info('Done!')
