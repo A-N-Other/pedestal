@@ -1,41 +1,58 @@
 #!/usr/bin/env python
 
-# GY171017
+# GY190923
 
 ''' explode: split FASTA/Q records to new files '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
-from collections import namedtuple
 from itertools import cycle
-from math import ceil
 from os import path
 from signal import signal, SIGPIPE, SIG_DFL
-from string import ascii_letters, digits  # Py2
+from string import ascii_letters, digits
 from sys import stdin, stdout
+from typing import Iterator, NamedTuple, TextIO
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 
 # Globals #####################################################################
 
 
-signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
-
-# data structures
-seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
-
-filenamechars = "-_" + ascii_letters + digits
+LEGAL_CHARS = "-_" + ascii_letters + digits
 
 
 # Classes #####################################################################
 
 
+class SeqRecord(NamedTuple):
+    ''' A class for holding sequence data '''
+    seqid: str
+    seq: str
+    quals: str = ''
+
+    def __len__(self):
+        return len(self.seq)
+
+    def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
+        ''' Print a sequence as FASTA/Q '''
+        if self.quals:
+            print(f'@{self.seqid}\n{self.seq}\n+\n{self.quals}', file=fileobj)
+        elif wrap:
+            print(f'>{self.seqid}', file=fileobj)
+            for g in grouper(self.seq, wrap):
+                print(g, file=fileobj)
+        else:
+            print(f'>{self.seqid}\n{self.seq}', file=fileobj)
+
+
 class MultiReader(object):
     ''' A class for reading FASTA/Q records '''
 
-    def __init__(self, inputstream):
+    def __init__(self, inputstream: TextIO, replaceU: bool=False):
         self._fileobj = inputstream
         self._buffer = ' '
+        self.replaceU = replaceU
 
     def __enter__(self):
         return self
@@ -46,54 +63,51 @@ class MultiReader(object):
     def __iter__(self):
         return self
 
-    def __next__(self):
+    def __next__(self) -> SeqRecord:
         while self._buffer and self._buffer[0] not in ('>', '@'):
             self._buffer = self._fileobj.readline()
         if not self._buffer:
             raise StopIteration
-        if self._buffer[0] == ">":
-            seqid = self._buffer[1:].strip()
+        if self._buffer.startswith('>'):
+            seqid = self._buffer[1:].strip('\r\n')
             self._buffer = self._fileobj.readline()
             seqlines = []
             while self._buffer and self._buffer[0] not in ('>', '@'):
-                seqlines.append(self._buffer.strip())
+                seqlines.append(self._buffer.strip('\r\n'))
                 self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, ''.join(seqlines).upper(), '')
-        else:
-            seqid = self._buffer[1:].strip()
-            seq = self._fileobj.readline().strip().upper()
+            if not (seq := ''.join(seqlines)):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq)
+        else:  # self._buffer.startswith('@')
+            seqid = self._buffer[1:].strip('\r\n')
+            seq = self._fileobj.readline().strip('\r\n')
             self._fileobj.readline()
-            quals = self._fileobj.readline().strip()
+            quals = self._fileobj.readline().strip('\r\n')
             self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, seq, quals)
-
-    next = __next__  # Py2 compatibility
+            if not (seq and quals):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq, quals)
 
 
 # Functions ###################################################################
 
 
-def grouper(iterable, k):
-    ''' Yield a memory-mapped iterable in chunks of `k` '''
-    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+def grouper(iterable: Iterator, k: int) -> Iterator[Iterator]:
+    ''' Yield a memory-mapped `iterable` in chunks of `k`
+    !!! If iterable % k != 0 the length of the last chunk will be <k !!! '''
+    for i in range(len(iterable) // k + (1 if len(iterable) % k else 0)):
         yield iterable[i*k:i*k+k]
 
 
-def printseq(seqid, seq, quals='', fileobj=stdout):
-    ''' Appropraitely prints a sequence '''
-    if quals:
-        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
-    elif 'wrap' not in args:
-        print('>{}\n{}'.format(seqid, seq), file=fileobj)
-    else:
-        print('>{}'.format(seqid), file=fileobj)
-        for chunk in grouper(seq, args.wrap):
-            print(chunk, file=fileobj)
-
-
-def sanitise(basename, sub='_'):
-    ''' Substitute nasty characters in file names '''
-    return ''.join(c if c in filenamechars else sub for c in basename)
+def sanitise(s: str, sub: str='_') -> str:
+    ''' Sanitise a string for file names '''
+    return ''.join(c if c in LEGAL_CHARS else sub for c in s)
 
 
 ###############################################################################
@@ -111,15 +125,15 @@ if __name__ == '__main__':
         '-c', '--chunks', type=int,
         help='Split the file into `c` chunks')
     parser.add_argument(
-        '-w', '--wrap', nargs='?', type=int, const=80,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s \
-        when supplied alone)')
-    parser.add_argument(
         '--dir', default='',
-        help='Output to an existing directory, `dir`')
+        help='Output to (an existing) directory')
     parser.add_argument(
         '--prefix', default='',
-        help='Preceed seqid, or chunk number with `-c`, with `prefix`')
+        help='Prefix file names with this string')
+    parser.add_argument(
+        '-w', '--wrap', nargs='?', type=int, const=80, default=0,
+        help='Wrap lines at `w` when outputting FASTA (%(const)s \
+        when supplied alone)')
 
     args = parser.parse_args()
 
@@ -127,19 +141,24 @@ if __name__ == '__main__':
         for f in args.input:
             with MultiReader(f) as F:
                 for record in F:
-                    n = sanitise(record.seqid.split()[0])
-                    n = path.join(args.dir, '{}{}.{}'.format(args.prefix, n,
-                        'fq' if record.quals else 'fa'))
-                    with open(n, 'w') as outfile:
-                        printseq(*record, outfile)
+                    p = path.join(
+                        args.dir,
+                        f'{args.prefix}' \
+                        f'{sanitise(record.seqid.split()[0])}' \
+                        f'.{"fq" if record.quals else "fa"}')
+                    print(p)
+                    with open(p, 'w') as outfile:
+                        record.print(args.wrap, outfile)
+            f.close()
 
     else:
-        outfs = [open(path.join(args.dir, args.prefix + '{}'.format(i)), 'w')
+        out_files = [open(path.join(args.dir, args.prefix + f'{i}'), 'w')
             for i in range(1, args.chunks + 1)]
-        outfsloop = cycle(outfs)
+        file_loop = cycle(out_files)
         for f in args.input:
             with MultiReader(f) as F:
                 for record in F:
-                    printseq(*record, next(outfsloop))
-        for f in outfs:
+                    record.print(args.wrap, next(file_loop))
+            f.close()
+        for f in out_files:
             f.close()
