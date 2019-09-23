@@ -23,11 +23,12 @@ cat aligned.fa | cons -n mycons -l > aligned.cons
 
 [**`cuti`**](cuti): ordering and selection of columnar data
 
-Builds on UNIX `cut` to allow re-ordering of selected columns
+Builds on UNIX `cut` to allow re-ordering of selected columns and selection by name
 ```bash
-cuti [-h] (-n NAMES [NAMES ...] | -f FIELDS) [-d DELIM] [--fill FILL] [input ...]
+cuti [-h] (-n NAMES [NAMES ...] | -N NAMES_FILE | -f FIELDS) [-d IN_DELIM]
+    [-D OUT_DELIM] [--fill FILL] [input [input ...]]
 --- usage examples ---
-cat *.tsv | cuti -f1-2,5,3-4 > merged.tsv
+cat *.tsv | cuti -f-2,5,3-4 > merged.tsv
 cuti file.csv -d, -n pvalue > pvalues
 ```
 

@@ -1,19 +1,14 @@
 #!/usr/bin/env python
 
-# GY180504
+# GY190923
 
 
 ''' cuti: ordering and selection of columnar data '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
 from signal import signal, SIGPIPE, SIG_DFL
 from sys import stdin, stderr
-
-
-# Globals #####################################################################
-
 
 signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
@@ -27,71 +22,70 @@ if __name__ == '__main__':
         description='Ordering and selection of columnar data',
         epilog='Column names passed with `-n` but missing in the `input`, \
         will be included as empty columns in the output, allowing variably \
-        sized or formatted files to be standardised. The same occurs \
-        where columns are specified by number with `-c`. A warning is passed \
+        sized or formatted files to be standardised. A warning is passed \
         to stderr when this occurs.',
         argument_default=SUPPRESS)
+    col_group = parser.add_mutually_exclusive_group(required=True)
+
     parser.add_argument(
         'input', nargs='*', type=FileType('r'), default=[stdin],
         help='Input file(s) (use "-" or leave blank for stdin)')
-    col_group = parser.add_mutually_exclusive_group(required=True)
     col_group.add_argument(
-        '-n', '--names', nargs='+',
+        '-n', '--names', type=str, nargs='+',
         help='Ordered (space separated) list of column names')
     col_group.add_argument(
-        '-f', '--fields',
+        '-N', '--names_file', type=FileType('r'),
+        help='Ordered (newline separated) list of column names in a file')
+    col_group.add_argument(
+        '-f', '--fields', type=str,
         help='Ordered (comma separated) list or ranges of column numbers \
         (1-based inclusive [1,n]) e.g. "1,3-4,2,5-8"')
     parser.add_argument(
-        '-d', '--delim', default='\t',
-        help='Column delimter (default TAB)')
+        '-d', '--in_delim', type=str, default='\t',
+        help='Column delimter for input (default TAB)')
+    parser.add_argument(
+        '-D', '--out_delim', type=str, default='\t',
+        help='Column delimter for output (default TAB)')
     parser.add_argument(
         '--fill', default='',
-        help='Replace blanks with `fill`')
+        help='Pad value for missing columns (in conjunction with `-n`/`-N`) \
+        (default "")')
+
     args = parser.parse_args()
 
-    # expand ranges in column specification
     if 'fields' in args:
-        cols = []
-        for i, c in enumerate(args.fields.split(',')):
-            if '-' in c:
-                c = c.split('-')
-                if c[0] == '' or c[1] == '':
-                    raise ValueError('Invalid format specifier - ranges must be closed')
-                cols += [j for j in range(int(c[0]), int(c[1])+1)]
+        sniff = args.input[0].readline().strip('\r\n').split(args.in_delim)
+        col_order = []
+        for field in args.fields.split(','):
+            if '-' not in field:
+                col_order.append(int(field)-1)
             else:
-                cols.append(int(c))
-        args.fields = [i-1 for i in cols]
+                if field.startswith('-'):
+                    field = '1' + field
+                elif field.endswith('-'):
+                    field += f'{len(sniff)}'
+                start, stop = field.split('-')
+                col_order += [i for i in range(int(start)-1, int(stop))]
+        if any(i >= len(sniff) for i in col_order):
+            raise ValueError('Defined columns exceed number in input')
+        print(args.out_delim.join([sniff[i] for i in col_order]))
+        for f in args.input:
+            while l := f.readline().strip('\r\n').split(args.in_delim):
+                print(args.out_delim.join([l[i] for i in col_order]))
+            f.close()
 
-    for f in args.input:
-
-        # generate the file-specific column mappings
-        l = f.readline().rstrip('\r\n').split(args.delim)
-        if 'names' in args:
-            colorder = []
-            for c in args.colnames:
-                try:
-                    colorder.append(l.index(c))
-                except ValueError:
-                    colorder.append(None)
-        else:
-            colorder = [i if i < len(l) else None for i in args.fields]
-        if any(c is None for c in colorder):
-            print('WARNING: Missing fields or column names in {}!'.format(
-                f.name), file=stderr)
-
-        # create a format string, replacing None with args.fill
-        outputfmt = args.delim.join(
-            '{}' if i is not None else args.fill for i in colorder)
-        colorder = [i for i in colorder if i is not None]
-
-        def printer(l):
-            print(outputfmt.format(
-                *(l[i] if l[i] else args.fill for i in colorder)))
-
-        if 'names' in args:
-            print(args.delim.join(c for c in args.names))
-        else:
-            printer(l)
-        for l in f:
-            printer(l.rstrip('\r\n').split(args.delim))
+    else:  # Column names provided with -n or -N
+        if 'names_file' in args:
+            args.names = [l.strip('\r\n') for l in args.names_file]
+            args.names_file.close()
+        for f in args.input:
+            sniff = f.readline().strip('\r\n').split(args.in_delim)
+            col_order = [sniff.index(field) if field in sniff else None
+                for field in args.names]
+            if any(field is None for field in col_order):
+                print(f'{f.name}: Missing columns fill be padded with `--fill`', file=stderr)
+            print(args.out_delim.join(args.names))
+            while l := f.readline().strip('\r\n').split(args.in_delim):
+                print(args.out_delim.join(
+                    [l[i] if i is not None else args.fill for i in col_order]))
+            f.close()
