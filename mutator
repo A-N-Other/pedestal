@@ -13,7 +13,6 @@ from signal import signal, SIGPIPE, SIG_DFL
 from sys import stdin, stdout
 from typing import Iterator, List, NamedTuple, TextIO
 
-
 signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 
@@ -165,11 +164,11 @@ if __name__ == '__main__':
     parser.add_argument(
         '-i', '--insertion', const=2e-10, default=0, nargs='?', type=float,
         help='Additionally mutate the input using this insertion frequency \
-        (default %(const)s)')
+        (%(const)s when supplied alone)')
     parser.add_argument(
         '-d', '--deletion', const=5.5e-10, default=0, nargs='?', type=float,
         help='Additionally mutate the input using this deletion frequency \
-        (default %(const)s)')
+        (%(const)s when supplied alone)')
     parser.add_argument(
         '-r', '--replicates', default=1, type=int,
         help='Replicates required for each sequence-cycle combination \
@@ -191,7 +190,7 @@ if __name__ == '__main__':
         (default %(default)s)')
     parser.add_argument(
         '-w', '--wrap', nargs='?', type=int, const=80, default=0,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        help='Wrap lines at `w` when outputting FASTA (%(const)s when \
         supplied alone)')
     parser.add_argument(
         '-q', '--quiet', action='store_true', default=False,
