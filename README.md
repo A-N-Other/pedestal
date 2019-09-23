@@ -115,10 +115,11 @@ cat file.fq | linearise | cut -f-2 | grep -wF "test" | linearise -v > test.fa
 
 `mutator` simulates both substitution and indel mutation at user-defined rates, or for the human by default. `mutator` can output sequential `-c/--cycles` (generations / years) of mutation within a single run, and output a requested number of `-r/--replicates` for each cycle. Importantly, `mutator` does not sample from a pool of mutations generated to represent the cycles, but directly uses their relative probabilities, ensuring that low-frequency events can still occur in early mutation cycles.
 ```bash
-mutator [-h] -c CYCLES [CYCLES ...] [-s [SUBSTITUTION]] [-i [INSERTION]] [-d [DELETION]]
-    [-r REPLICATES] [-l INDELLENGTH] [-w [WRAP]] [--verbose] [input ...]
+mutator [-h] -c CYCLES [CYCLES ...] [-s [SUBSTITUTION]] [-i [INSERTION]]
+    [-d [DELETION]] [-r REPLICATES] [-l INDEL_LENGTH] [--sub_sd SUB_SD]
+    [--ins_sd INS_SD] [--del_sd DEL_SD] [-w [WRAP]] [-q] [input [input ...]]
 --- usage examples ---
-cat file.fa | mutator -c $(seq -s" " 25000 25000 10000000) -r 100 > mutated.fa
+cat file.fa | mutator -c $(seq -f"%.0f" -s" " 0 1000000 10000000) -r 100 -i -d > mutated.fa
 mutator -c 100000 -s 5.4e-9 -i 1.55e-10 -d 1.55e-10 file.fq > mutated.fa
 ```
 
