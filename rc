@@ -1,43 +1,55 @@
 #!/usr/bin/env python
 
-# GY171017
+# GY190923
 
 ''' rc: reverse complement '''
 
 
-from __future__ import print_function  # Py2
 from argparse import ArgumentParser, FileType, SUPPRESS
-from collections import namedtuple
-from math import ceil
 from signal import signal, SIGPIPE, SIG_DFL
 from sys import stdin, stdout
+from typing import Iterator, NamedTuple, TextIO
+
+signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
 
 
 # Globals #####################################################################
 
 
-signal(SIGPIPE, SIG_DFL)  # Gracefully handle downstream PIPE closure
-
-# translation pattern for reverse-complement
-try:
-    _acgt_comp = str.maketrans('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
-except:
-    from string import maketrans  # Py2
-    _acgt_comp = maketrans('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
-
-# data structures
-seqrecord = namedtuple('seqrecord', ['seqid', 'seq', 'quals'])
+NUCL_COMP = str.maketrans('ATUCGXNRYWSKMDVHB', 'TAAGCXNYRWSMKHBDV')
 
 
 # Classes #####################################################################
 
 
+class SeqRecord(NamedTuple):
+    ''' A class for holding sequence data '''
+    seqid: str
+    seq: str
+    quals: str = ''
+
+    def __len__(self):
+        return len(self.seq)
+
+    def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
+        ''' Print a sequence as FASTA/Q '''
+        if self.quals:
+            print(f'@{self.seqid}\n{self.seq}\n+\n{self.quals}', file=fileobj)
+        elif wrap:
+            print(f'>{self.seqid}', file=fileobj)
+            for g in grouper(self.seq, wrap):
+                print(g, file=fileobj)
+        else:
+            print(f'>{self.seqid}\n{self.seq}', file=fileobj)
+
+
 class MultiReader(object):
     ''' A class for reading FASTA/Q records '''
 
-    def __init__(self, inputstream):
+    def __init__(self, inputstream: TextIO, replaceU: bool=False):
         self._fileobj = inputstream
         self._buffer = ' '
+        self.replaceU = replaceU
 
     def __enter__(self):
         return self
@@ -48,56 +60,54 @@ class MultiReader(object):
     def __iter__(self):
         return self
 
-    def __next__(self):
+    def __next__(self) -> SeqRecord:
         while self._buffer and self._buffer[0] not in ('>', '@'):
             self._buffer = self._fileobj.readline()
         if not self._buffer:
             raise StopIteration
-        if self._buffer[0] == ">":
-            seqid = self._buffer[1:].strip()
+        if self._buffer.startswith('>'):
+            seqid = self._buffer[1:].strip('\r\n')
             self._buffer = self._fileobj.readline()
             seqlines = []
             while self._buffer and self._buffer[0] not in ('>', '@'):
-                seqlines.append(self._buffer.strip())
+                seqlines.append(self._buffer.strip('\r\n'))
                 self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, ''.join(seqlines).upper(), '')
-        else:
-            seqid = self._buffer[1:].strip()
-            seq = self._fileobj.readline().strip().upper()
+            if not (seq := ''.join(seqlines)):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq)
+        else:  # self._buffer.startswith('@')
+            seqid = self._buffer[1:].strip('\r\n')
+            seq = self._fileobj.readline().strip('\r\n')
             self._fileobj.readline()
-            quals = self._fileobj.readline().strip()
+            quals = self._fileobj.readline().strip('\r\n')
             self._buffer = self._fileobj.readline()
-            return seqrecord(seqid, seq, quals)
-
-    next = __next__  # Py2 compatibility
+            if not (seq and quals):
+                raise EOFError
+            seq = seq.upper()
+            if self.replaceU:
+                seq = seq.replace('U', 'T')
+            return SeqRecord(seqid, seq, quals)
 
 
 # Functions ###################################################################
 
 
-def rcomp(record):
-    ''' Reverse complement a seqrecord '''
-    return record._replace(
-        seq=record.seq[::-1].translate(_acgt_comp),
-        quals=record.quals[::-1])
+def rc(record: SeqRecord) -> SeqRecord:
+    ''' Reverse complement a SeqRecord '''
+    return SeqRecord(
+        record.seqid,
+        record.seq[::-1].translate(NUCL_COMP),
+        record.quals[::-1])
 
 
-def grouper(iterable, k):
-    ''' Yield a memory-mapped iterable in chunks of `k` '''
-    for i in range(int(ceil(float(len(iterable)) / k))):  # Py2
+def grouper(iterable: Iterator, k: int) -> Iterator[Iterator]:
+    ''' Yield a memory-mapped `iterable` in chunks of `k`
+    !!! If iterable % k != 0 the length of the last chunk will be <k !!! '''
+    for i in range(len(iterable) // k + (1 if len(iterable) % k else 0)):
         yield iterable[i*k:i*k+k]
-
-
-def printseq(seqid, seq, quals='', fileobj=stdout):
-    ''' Appropraitely prints a sequence '''
-    if quals:
-        print('@{}\n{}\n+\n{}'.format(seqid, seq, quals), file=fileobj)
-    elif 'wrap' not in args:
-        print('>{}\n{}'.format(seqid, seq), file=fileobj)
-    else:
-        print('>{}'.format(seqid), file=fileobj)
-        for chunk in grouper(seq, args.wrap):
-            print(chunk, file=fileobj)
 
 
 ###############################################################################
@@ -112,8 +122,8 @@ if __name__ == '__main__':
         'input', nargs='*', type=FileType('r'), default=[stdin],
         help='Input file(s) (use "-" or leave blank for stdin)')
     parser.add_argument(
-        '-w', '--wrap', nargs='?', type=int, const=80,
-        help='Wrap lines at `w` when outputting FASTA (default %(const)s when \
+        '-w', '--wrap', nargs='?', type=int, const=80, default=0,
+        help='Wrap lines at `w` when outputting FASTA (%(const)s when \
         supplied alone)')
 
     args = parser.parse_args()
@@ -121,4 +131,5 @@ if __name__ == '__main__':
     for f in args.input:
         with MultiReader(f) as F:
             for record in F:
-                printseq(*rcomp(record))
+                rc(record).print(wrap=args.wrap)
+        f.close()
