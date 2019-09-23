@@ -60,6 +60,9 @@ class SeqRecord(NamedTuple):
     seq: str
     quals: str = ''
 
+    def __len__(self):
+        return len(self.seq)
+
     def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
         ''' Print a sequence as FASTA/Q '''
         if self.quals:
@@ -259,7 +262,7 @@ if __name__ == '__main__':
             logger.info(f'\t{f.name}')
             with MultiReader(f, replaceU=True) as F:
                 for n_records, record in enumerate(F, 1):
-                    if len(record.seq) < args.cds_len:
+                    if len(record) < args.cds_len:
                         continue
                     # Fill the scores for the true sequences
                     resis = []
@@ -269,7 +272,7 @@ if __name__ == '__main__':
                     for g in iterkmers(''.join(resis), 3):
                         aa_chain[g] += 1
                     # Fill the nullscores from the scrambled sequences
-                    shuf = ''.join(sample(record.seq, k=len(record.seq)))
+                    shuf = ''.join(sample(record.seq, k=len(record)))
                     resis = []
                     for g in iterkmers(shuf, 3, 3):
                             resis.append(resi := CODON_MAP.get(g, 'X'))
@@ -336,11 +339,11 @@ if __name__ == '__main__':
                                 pass
                         codon_bitscore = codon_score - codon_nullscore
                         aa_bitscore = aa_score - aa_nullscore
-                        final_bitscore = (aa_bitscore + codon_bitscore) / len(cds.seq)
+                        final_bitscore = (aa_bitscore + codon_bitscore) / len(cds)
                         if final_bitscore > 0:
                             cds_regions.append(cds)
                     if args.longest and cds_regions:
-                        cds_regions = [sorted(cds_regions, key=lambda x: len(x.seq), reverse=True)[0]]
+                        cds_regions = [sorted(cds_regions, key=lambda x: len(x), reverse=True)[0]]
                     for cds in cds_regions:
                         retained += 1
                         cds.print(wrap=args.wrap)
@@ -348,7 +351,7 @@ if __name__ == '__main__':
                 for record in F:
                     cds_regions = find_orfs(record, args.unstranded)
                     if args.longest and cds_regions:
-                        cds_regions = [sorted(cds_regions, key=lambda x: len(x.seq), reverse=True)[0]]
+                        cds_regions = [sorted(cds_regions, key=lambda x: len(x), reverse=True)[0]]
                     for cds in cds_regions:
                         retained += 1
                         cds.print(wrap=args.wrap)

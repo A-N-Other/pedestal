@@ -38,6 +38,9 @@ class SeqRecord(NamedTuple):
     seq: str
     quals: str = ''
 
+    def __len__(self):
+        return len(self.seq)
+
     def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
         ''' Print a sequence as FASTA/Q '''
         if self.quals:
@@ -223,7 +226,7 @@ if __name__ == '__main__':
     with FastaReader(args.input, True) as F:
         for i, record in enumerate(F):
             if not i:
-                aln = [dd(int) for _ in range(len(record.seq))]
+                aln = [dd(int) for _ in range(len(record))]
             for j, base in enumerate(record.seq):
                 aln[j][base] += 1
     args.input.close()

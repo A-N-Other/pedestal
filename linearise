@@ -22,6 +22,9 @@ class SeqRecord(NamedTuple):
     seq: str
     quals: str = ''
 
+    def __len__(self):
+        return len(self.seq)
+
     def print(self, wrap: int=0, fileobj: TextIO=stdout) -> None:
         ''' Print a sequence as FASTA/Q '''
         if self.quals:
