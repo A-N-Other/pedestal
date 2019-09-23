@@ -234,6 +234,6 @@ if __name__ == '__main__':
                         _record = SeqRecord(
                             f'{record.seqid} cycle:{c} replicate:{r} n_sub:{n_sub} n_ins:{n_ins} n_del:{n_del}',
                             mutate(record.seq, n_sub, n_ins, n_del, args.indel_length))
-                        _record.print()
+                        _record.print(wrap=args.wrap)
         f.close()
     logger.info('Done!')
