@@ -38,6 +38,18 @@ cat interleaved.fq | deinterleave file_1.fq file_2.fq
 zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.gz)
 ```
 
+[**`edIted`**](edIted): statistical comparison of RNA editing
+
+`edIted` performs assessments of RNA editing from samtools mpileup data, building on the Dirichlet-based models implemented in ACCUSA2 [Piechotta (2013) Bioinf, 10.1093/bioinformatics/btt268]. When run with test data alone, `edIted` detects base modification by comparing the goodness of fit of Dirchlet models of the base error (derived from the Phred quality data in the mpileup input) and the background error (derived empirically from a sample of the data) to the base frequencies recorded for the position. With an additional control dataset, `edIted` performs the above analysis to determine significantly edited sites and then tests for differential editing between the datasets by comparing the goodness of fit of Dirichlet models of the base error from the test and control datasets to their own and each others base frequencies. `edIted` optionally makes use of stranding information included in the mpileup (--output-extra XS) where aligners record this information in the BAM, increasing accuracy and allowing the strand of the edited base to be output.
+```bash
+edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-s] [-o OUTPUT]
+    [-e EDIT] [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-b BACKGROUND] [-q]
+--- usage examples ---
+samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra XS test.bam | awk '$4 > 1' | pigz > test.mpileup.gz
+edIted -e AG -s -t test.mpileup.gz > AG_edit_sites.bed
+edIted -e AG -s -t test.mpileup.gz -c control.mpileup.gz -o differential_edit_sites.bed
+```
+
 [**`explode`**](explode): split FASTA/Q records to new files
 ```bash
 explode [-h] [-c CHUNKS] [-w [WRAP]] [--dir DIR] [--prefix PREFIX] [input ...]
