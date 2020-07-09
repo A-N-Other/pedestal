@@ -21,8 +21,8 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.1'
-__stamp__ = 'GY200626'
+__version__ = '0.2'
+__stamp__ = 'GY200709'
 __status__ = 'Development'
 __license__ = 'MIT license'
 
@@ -41,6 +41,12 @@ indel_re = re.compile('[0-9]+')
 # Classes #####################################################################
 
 
+class Empty(object):
+    ''' Dummy class to allow class creation without __init__ being called when
+    copying UnstrandedPileup and StrandedPileup instances '''
+    pass
+
+
 @total_ordering
 class UnstrandedPileup(object):
     ''' A class for holding per-base stranded mpileup data '''
@@ -51,16 +57,16 @@ class UnstrandedPileup(object):
 
     def _parse(self) -> None:
         self.base_counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0}
-        base_probs = {'A': [], 'C': [], 'G': [], 'T': []}
+        self.base_probs = {'A': [], 'C': [], 'G': [], 'T': []}
         _, mapping, quals, *_ = self.mpileup
         i, j = 0, 0
         while i < len(mapping):
             if mapping[i] in '.,':
                 self.base_counts[self.ref] += 1
                 p = pow(10, -ord(quals[j]) / 10)
-                base_probs[self.ref].append(1 - p)
+                self.base_probs[self.ref].append(1 - p)
                 for b in other_nts[self.ref]:
-                    base_probs[b].append(p / 3)
+                    self.base_probs[b].append(p / 3)
                 i += 1
                 j += 1
             elif mapping[i] in '<>*#':
@@ -74,9 +80,9 @@ class UnstrandedPileup(object):
                 alt = mapping[i].upper()
                 self.base_counts[alt] += 1
                 p = pow(10, -ord(quals[j]) / 10)
-                base_probs[alt].append(1 - p)
+                self.base_probs[alt].append(1 - p)
                 for b in other_nts[alt]:
-                    base_probs[b].append(p / 3)
+                    self.base_probs[b].append(p / 3)
                 i += 1
                 j += 1
             elif mapping[i] in 'Nn':
@@ -86,8 +92,6 @@ class UnstrandedPileup(object):
                 result = indel_re.match(mapping, i + 1)
                 length = int(mapping[result.start():result.end()])
                 i = result.end() + length
-        self.base_probs = {k: sum(v) / len(v) if v else 0.0
-            for k, v in base_probs.items()}
         del(self.mpileup)
 
     def _is_valid_operand(self, other: object) -> bool:
@@ -120,6 +124,25 @@ class UnstrandedPileup(object):
         except AttributeError:
             raise AttributeError(f'{name} is not an UnstrandedPileup attribute')
 
+    def __add__(self, other: object) -> object:
+        if self == other:
+            obj = Empty()
+            obj.__class__ = self.__class__
+            obj.chrom, obj.pos, obj.ref = self.chrom, self.pos, self.ref
+            obj.base_counts = {}
+            obj.base_probs = {}
+            for base in 'ACGT':
+                obj.base_counts[base] = self[base] + other[base]
+                obj.base_probs[base] = self.base_probs[base] + other.base_probs[base]
+            return obj
+        else:
+            raise ValueError('UnstrandedPileup objects do not refer to the same position')
+
+    def __radd__(self, other: object) -> object:
+        if other == 0:
+            return self
+        return self.__add__(other)
+
     def depth(self) -> int:
         try:
             return sum(self.base_counts.values())
@@ -134,22 +157,33 @@ class UnstrandedPileup(object):
             self._parse()
             return self.is_potential_edit()
 
-    def alphas(self) -> np.ndarray:
+    def a(self) -> np.ndarray:
+        ''' unscaled alpha values for scipy.stats.dirichlet '''
         try:
-            return np.array(
-                list(p + (args.noise / 3 if b != self.ref else 0.0)
-                for b, p in self.base_probs.items()))
+            return np.array(list(
+                (0.0 if k == self.ref else args.noise / 3) + (sum(v)/len(v) if v else 0.0)
+                for k, v in self.base_probs.items()))
         except AttributeError:
             self._parse()
-            return self.alphas()
+            return self.a()
+
+    def x(self) -> np.ndarray:
+        ''' quantile values for scipy.stats.dirichlet '''
+        try:
+            return np.array(list(
+                sum(v)/len(v) if v else 0.0
+                for k, v in self.base_probs.items()))
+        except AttributeError:
+            self._parse()
+            return self.x()
 
     def __str__(self) -> str:
         try:
             return f'{self.chrom}\t{self.pos}\t{self.ref}\t' + \
-                f'{self.base_counts["A"]}@{self.base_probs["A"]:.5f}\t' + \
-                f'{self.base_counts["C"]}@{self.base_probs["C"]:.5f}\t' + \
-                f'{self.base_counts["G"]}@{self.base_probs["G"]:.5f}\t' + \
-                f'{self.base_counts["T"]}@{self.base_probs["T"]:.5f}'
+                f'{self.base_counts["A"]}\t' + \
+                f'{self.base_counts["C"]}\t' + \
+                f'{self.base_counts["G"]}\t' + \
+                f'{self.base_counts["T"]}'
         except AttributeError:
             self._parse()
             return self.__str__()
@@ -167,7 +201,7 @@ class StrandedPileup(object):
         self.base_counts = {
             True: {'A': 0, 'C': 0, 'G': 0, 'T': 0},
             False: {'A': 0, 'C': 0, 'G': 0, 'T': 0}}
-        base_probs = {
+        self.base_probs = {
             True: {'A': [], 'C': [], 'G': [], 'T': []},
             False: {'A': [], 'C': [], 'G': [], 'T': []}}
         _, mapping, quals, strand, *_ = self.mpileup
@@ -177,9 +211,9 @@ class StrandedPileup(object):
             if mapping[i] in '.,':
                 self.base_counts[strand[j]][self.ref] += 1
                 p = pow(10, -ord(quals[j]) / 10)
-                base_probs[strand[j]][self.ref].append(1 - p)
+                self.base_probs[strand[j]][self.ref].append(1 - p)
                 for b in other_nts[self.ref]:
-                    base_probs[strand[j]][b].append(p / 3)
+                    self.base_probs[strand[j]][b].append(p / 3)
                 i += 1
                 j += 1
             elif mapping[i] in '<>*#':
@@ -193,9 +227,9 @@ class StrandedPileup(object):
                 alt = mapping[i].upper()
                 self.base_counts[strand[j]][alt] += 1
                 p = pow(10, -ord(quals[j]) / 10)
-                base_probs[strand[j]][alt].append(1 - p)
+                self.base_probs[strand[j]][alt].append(1 - p)
                 for b in other_nts[alt]:
-                    base_probs[strand[j]][b].append(p / 3)
+                    self.base_probs[strand[j]][b].append(p / 3)
                 i += 1
                 j += 1
             elif mapping[i] in 'Nn':
@@ -205,9 +239,6 @@ class StrandedPileup(object):
                 result = indel_re.match(mapping, i + 1)
                 length = int(mapping[result.start():result.end()])
                 i = result.end() + length
-        self.base_probs = {
-            k: {k2: sum(v2)/len(v2) if v2 else 0.0 for k2, v2 in v.items()}
-            for k, v in base_probs.items()}
         del(self.mpileup)
 
     def _is_valid_operand(self, other: object) -> bool:
@@ -241,6 +272,28 @@ class StrandedPileup(object):
         except AttributeError:
             raise AttributeError(f'{name} is not a StrandedPileup attribute')
 
+    def __add__(self, other: object) -> object:
+        if self == other:
+            obj = Empty()
+            obj.__class__ = self.__class__
+            obj.chrom, obj.pos, obj.ref = self.chrom, self.pos, self.ref
+            obj.base_counts = {True: {}, False: {}}
+            obj.base_probs = {True: {}, False: {}}
+            for strand in (True, False):
+                for base in 'ACGT':
+                    obj.base_counts[strand][base] = \
+                        self[base, strand] + other[base, strand]
+                    obj.base_probs[strand][base] = \
+                        self.base_probs[strand][base] + other.base_probs[strand][base]
+            return obj
+        else:
+            raise ValueError('StrandedPileup objects do not refer to the same position')
+
+    def __radd__(self, other: object) -> object:
+        if other == 0:
+            return self
+        return self.__add__(other)
+
     def depth(self, strand=None) -> int:
         try:
             if strand is not None:
@@ -258,26 +311,33 @@ class StrandedPileup(object):
             self._parse()
             return self.is_potential_edit(strand)
 
-    def alphas(self, strand: bool) -> np.ndarray:
+    def a(self, strand: bool) -> np.ndarray:
+        ''' unscaled alpha values for scipy.stats.dirichlet '''
         try:
-            return np.array(
-                list(p + (args.noise / 3 if b != self.ref else 0.0)
-                for b, p in self.base_probs[strand].items()))
+            return np.array(list(
+                (0.0 if k == self.ref else args.noise / 3) + (sum(v)/len(v) if v else 0.0)
+                for k, v in self.base_probs[strand].items()))
         except AttributeError:
             self._parse()
-            return self.alphas(strand)
+            return self.a(strand)
+
+    def x(self, strand: bool) -> np.ndarray:
+        ''' quantile values for scipy.stats.dirichlet '''
+        try:
+            return np.array(list(
+                sum(v)/len(v) if v else 0.0
+                for k, v in self.base_probs[strand].items()))
+        except AttributeError:
+            self._parse()
+            return self.x(strand)
 
     def __str__(self) -> str:
         try:
             return f'{self.chrom}\t{self.pos}\t{self.ref}\t' + \
-                f'{self.base_counts[True]["A"]}@{self.base_probs[True]["A"]:.5f}:' + \
-                f'{self.base_counts[False]["A"]}@{self.base_probs[False]["A"]:.5f}\t' + \
-                f'{self.base_counts[True]["C"]}@{self.base_probs[True]["C"]:.5f}:' + \
-                f'{self.base_counts[False]["C"]}@{self.base_probs[False]["C"]:.5f}\t' + \
-                f'{self.base_counts[True]["G"]}@{self.base_probs[True]["G"]:.5f}:' + \
-                f'{self.base_counts[False]["G"]}@{self.base_probs[False]["G"]:.5f}\t' + \
-                f'{self.base_counts[True]["T"]}@{self.base_probs[True]["T"]:.5f}:' + \
-                f'{self.base_counts[False]["T"]}@{self.base_probs[False]["T"]:.5f}'
+                f'{self.base_counts[True]["A"]}:{self.base_counts[False]["A"]}\t' + \
+                f'{self.base_counts[True]["C"]}:{self.base_counts[False]["C"]}\t' + \
+                f'{self.base_counts[True]["G"]}:{self.base_counts[False]["G"]}\t' + \
+                f'{self.base_counts[True]["T"]}:{self.base_counts[False]["T"]}'
         except AttributeError:
             self._parse()
             return self.__str__()
@@ -286,7 +346,7 @@ class StrandedPileup(object):
 # Functions ###################################################################
 
 
-def shared_elements(*inputs: Iterator) -> Iterator[Iterator]:
+def shared_elements(*inputs: Iterator) -> Iterator[list]:
     ''' Aligns an arbitrary number of sorted iterables and yields matching
     groups '''
     End = object()
@@ -301,36 +361,54 @@ def shared_elements(*inputs: Iterator) -> Iterator[Iterator]:
             vals = [next(i) if v == low else v for i, v in zip(inputs, vals)]
 
 
-def differential_stranded(test: StrandedPileup, ctrl: StrandedPileup) -> bool:
+def align_elements(*inputs: Iterator, missing: Any=None) -> Iterator[tuple]:
+    ''' Aligns an arbitrary number of sorted iterables and yields groups,
+    filling missing entries for individual iterables with `missing` '''
+    End = object()
+    inputs = [chain(i, [End]) for i in inputs]
+    vals = [next(i) for i in inputs]
+    while not all(v is End for v in vals):
+        low = min(v for v in vals if v is not End)
+        yield tuple(v if v == low else missing for v in vals)
+        vals = [next(i) if v == low else v for i, v in zip(inputs, vals)]
+
+
+def differential_stranded(test_pileups: Tuple[StrandedPileup], ctrl_pileups: Tuple[StrandedPileup]) -> bool:
     significant = False
     to_test = []
-    if test.is_potential_edit(True) and ctrl.depth(True) >= args.depth:
-        if args.edit:
-            to_test += [(args.edit[1], True)]
-        else:
-            to_test += [(alt, True) for alt in other_nts[test.ref]]
-    if test.is_potential_edit(False) and ctrl.depth(False) >= args.depth:
-        if args.edit:
-            to_test += [(args.edit[1], False)]
-        else:
-            to_test += [(alt, False) for alt in other_nts[test.ref]]
+    test = sum(test_pileups)
+    ctrl = sum(ctrl_pileups)
+    for strand in (True, False):
+        if test.is_potential_edit(strand) and ctrl.depth(strand) >= args.depth:
+            if args.edit:
+                if test[args.edit[1], strand] >= args.alt_depth and \
+                        sum(t[args.edit[1], strand] > 0 for t in test_pileups) >= args.replicates:
+                    to_test.append((args.edit[1], strand))
+            else:
+                to_test += [
+                    (alt, strand) for alt in other_nts[test.ref] if
+                    (test[alt, strand] >= args.alt_depth and
+                        sum(t[alt, strand] > 0 for t in test_pileups) >= args.replicates)]
     for alt, strand in to_test:
-        if test[alt, strand] >= args.alt_depth:
+        try:
             scale = test.depth(strand)
-            test_x = np.array(list(test.base_probs[strand].values()))
-            test_a = test.alphas(strand)
+            test_x = test.x(strand)
+            test_a = test.a(strand)
             Z = log10(
                 dirichlet.pdf(test_x, test_a * scale) / \
                 dirichlet.pdf(test_x, background_probs[test.ref] * scale))
+            Z *= sum(t[alt, strand] > 0 for t in test_pileups) / len(test_pileups)
             if Z > args.z_score:
                 scale = min(test.depth(strand), ctrl.depth(strand))
                 test_a = test_a * scale
-                ctrl_x = np.array(list(ctrl.base_probs[strand].values()))
-                ctrl_a = ctrl.alphas(strand) * scale
+                ctrl_x = ctrl.x(strand)
+                ctrl_a = ctrl.a(strand) * scale
                 Z = log10(
                     (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a)) / \
                     (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
-                if Z > args.z_score and test[alt, strand] / test.depth(strand) > \
+                Z *= sum(t[alt, strand] > 0 for t in test_pileups) / len(test_pileups)
+                if Z > args.z_score and \
+                        test[alt, strand] / test.depth(strand) > \
                         ctrl[alt, strand] / ctrl.depth(strand):
                     print(
                         f'{test.chrom}\t'
@@ -341,67 +419,84 @@ def differential_stranded(test: StrandedPileup, ctrl: StrandedPileup) -> bool:
                         f'{"+" if strand else "-"}',
                         file=args.output, flush=True)
                     significant = True
-        return significant
-
-
-def differential_unstranded(test: UnstrandedPileup, ctrl: UnstrandedPileup) -> bool:
-    significant = False
-    if test.is_potential_edit() and ctrl.depth() >= args.depth:
-        if args.edit:
-            to_test = args.edit[1]
-        else:
-            to_test = other_nts[test.ref]
-        for alt in to_test:
-            if test[alt] >= args.alt_depth:
-                scale = test.depth()
-                test_x = np.array(list(test.base_probs.values()))
-                test_a = test.alphas()
-                Z = log10(
-                    dirichlet.pdf(test_x, test_a * scale) / \
-                    dirichlet.pdf(test_x, background_probs[test.ref] * scale))
-                if Z > args.z_score:
-                    scale = min(test.depth(), ctrl.depth())
-                    test_a = test_a * scale
-                    ctrl_x = np.array(list(ctrl.base_probs.values()))
-                    ctrl_a = ctrl.alphas() * scale
-                    Z = log10(
-                        (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a)) / \
-                        (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
-                    if Z > args.z_score and \
-                            test[alt] / test.depth() > ctrl[alt] / ctrl.depth():
-                        print(
-                            f'{test.chrom}\t'
-                            f'{test.pos - 1}\t'  # BED6 is 0-based
-                            f'{test.pos}\t'
-                            f'{test.ref}{alt}\t'
-                            f'{Z:.2f}\t'
-                            f'.',
-                            file=args.output, flush=True)
-                        significant = True
+        except ValueError:
+            continue
     return significant
 
 
-def detect_stranded(test: StrandedPileup) -> bool:
+def differential_unstranded(test_pileups: Tuple[UnstrandedPileup], ctrl_pileups: Tuple[UnstrandedPileup]) -> bool:
     significant = False
     to_test = []
-    if test.is_potential_edit(True):
+    test = sum(test_pileups)
+    ctrl = sum(ctrl_pileups)
+    if test.is_potential_edit() and ctrl.depth() >= args.depth:
         if args.edit:
-            to_test += [(args.edit[1], True)]
+            if test[args.edit[1]] >= args.alt_depth and \
+                    sum(t[args.edit[1]] > 0 for t in test_pileups) >= args.replicates:
+                to_test.append(args.edit[1])
         else:
-            to_test += [(alt, True) for alt in other_nts[test.ref]]
-    if test.is_potential_edit(False):
-        if args.edit:
-            to_test += [(args.edit[1], False)]
-        else:
-            to_test += [(alt, False) for alt in other_nts[test.ref]]
-    for alt, strand in to_test:
-        if test[alt, strand] >= args.alt_depth:
-            scale = test.depth(strand)
-            test_x = np.array(list(test.base_probs[strand].values()))
-            test_a = test.alphas(strand)
+            to_test += [
+                alt for alt in other_nts[test.ref] if
+                (test[alt] >= args.alt_depth and
+                    sum(t[alt] > 0 for t in test_pileups) >= args.replicates)]
+    for alt in to_test:
+        try:
+            scale = test.depth()
+            test_x = test.x()
+            test_a = test.a()
             Z = log10(
                 dirichlet.pdf(test_x, test_a * scale) / \
                 dirichlet.pdf(test_x, background_probs[test.ref] * scale))
+            Z *= sum(t[alt] > 0 for t in test_pileups) / len(test_pileups)
+            if Z > args.z_score:
+                scale = min(test.depth(), ctrl.depth())
+                test_a = test_a * scale
+                ctrl_x = ctrl.x()
+                ctrl_a = ctrl.a() * scale
+                Z = log10(
+                    (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a)) / \
+                    (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
+                Z *= sum(t[alt] > 0 for t in test_pileups) / len(test_pileups)
+                if Z > args.z_score and \
+                        test[alt] / test.depth() > ctrl[alt] / ctrl.depth():
+                    print(
+                        f'{test.chrom}\t'
+                        f'{test.pos - 1}\t'  # BED6 is 0-based
+                        f'{test.pos}\t'
+                        f'{test.ref}{alt}\t'
+                        f'{Z:.2f}\t'
+                        f'.',
+                        file=args.output, flush=True)
+                    significant = True
+        except ValueError:
+            continue
+    return significant
+
+
+def detect_stranded(test_pileups: Tuple[StrandedPileup]) -> bool:
+    significant = False
+    to_test = []
+    test = sum(test_pileups)
+    for strand in (True, False):
+        if test.is_potential_edit(strand):
+            if args.edit:
+                if test[args.edit[1], strand] >= args.alt_depth and \
+                        sum(t[args.edit[1], strand] > 0 for t in test_pileups) >= args.replicates:
+                    to_test.append((args.edit[1], strand))
+            else:
+                to_test += [
+                    (alt, strand) for alt in other_nts[test.ref] if
+                    (test[alt, strand] >= args.alt_depth and
+                        sum(t[alt, strand] > 0 for t in test_pileups) >= args.replicates)]
+    for alt, strand in to_test:
+        try:
+            scale = test.depth(strand)
+            test_x = test.x(strand)
+            test_a = test.a(strand)
+            Z = log10(
+                dirichlet.pdf(test_x, test_a * scale) / \
+                dirichlet.pdf(test_x, background_probs[test.ref] * scale))
+            Z *= sum(t[alt, strand] > 0 for t in test_pileups) / len(test_pileups)
             if Z > args.z_score:
                 print(
                     f'{test.chrom}\t'
@@ -412,24 +507,34 @@ def detect_stranded(test: StrandedPileup) -> bool:
                     f'{"+" if strand else "-"}',
                     file=args.output, flush=True)
                 significant = True
+        except ValueError:
+            continue
     return significant
 
 
-def detect_unstranded(test: UnstrandedPileup) -> bool:
+def detect_unstranded(test_pileups: Tuple[UnstrandedPileup]) -> bool:
     significant = False
+    test = sum(test_pileups)
+    to_test = []
     if test.is_potential_edit():
         if args.edit:
-            to_test = args.edit[1]
+            if test[args.edit[1]] >= args.alt_depth and \
+                    sum(t[args.edit[1]] > 0 for t in test_pileups) >= args.replicates:
+                to_test.append(args.edit[1])
         else:
-            to_test = other_nts[test.ref]
+            to_test += [
+                alt for alt in other_nts[test.ref] if
+                (test[alt] >= args.alt_depth and
+                    sum(t[alt] > 0 for t in test_pileups) >= args.replicates)]
         for alt in to_test:
-            if test[alt] >= args.alt_depth:
+            try:
                 scale = test.depth()
-                test_x = np.array(list(test.base_probs.values()))
-                test_a = test.alphas()
+                test_x = test.x()
+                test_a = test.a()
                 Z = log10(
                     dirichlet.pdf(test_x, test_a * scale) / \
                     dirichlet.pdf(test_x, background_probs[test.ref] * scale))
+                Z *= sum(t[alt] > 0 for t in test_pileups) / len(test_pileups)
                 if Z > args.z_score:
                     print(
                         f'{test.chrom}\t'
@@ -440,6 +545,8 @@ def detect_unstranded(test: UnstrandedPileup) -> bool:
                         f'.',
                         file=args.output, flush=True)
                     significant = True
+            except ValueError:
+                continue
     return significant
 
 
@@ -456,7 +563,8 @@ if __name__ == '__main__':
         epilog=f'%(prog)s v{__version__}_{__stamp__} ({__status__})')
     parser.add_argument(
         '-t', '--test', nargs='+', required=True,
-        help='test/treated mpileup file(s)')
+        help='test/treated mpileup file(s), with multiple files treated as \
+        biological replicates')
     parser.add_argument(
         '-c', '--control', nargs='+',
         help='optional control/untreated mpileup file(s), which will make \
@@ -490,9 +598,15 @@ if __name__ == '__main__':
         help='minimum required alt count for ref-to-alt editing to be \
         considered (default %(default)s)')
     parser.add_argument(
-        '-b', '--background', type=int, default=5_000_000,
-        help='construct the model of the background error rate from this many \
-        test dataset nucleotides (default %(default)s)')
+        '-r', '--replicates', type=int, default=1,
+        help='where replicates are given, the minimum number of replicates in \
+        which editing must be found to be considered (default %(default)s)')
+    # parser.add_argument(
+    #     '-b', '--blacklist', nargs='+',
+    #     help='regions (BED format) to exclude from analyses')
+    # parser.add_argument(
+    #     '-v', '--vcf', nargs='+',
+    #     help='known variations (VCF format) to exclude from analyses')
     parser.add_argument(
         '-q', '--quiet', action='store_true',
         help='silence progress reporting')
@@ -517,78 +631,99 @@ if __name__ == '__main__':
 
     logger.info('Determining background error rates')
     alt_freq = {k: Counter({'A': 0, 'C': 0, 'G': 0, 'T': 0}) for k in 'ACGT'}
-    bases = (UnstrandedPileup(l) for f in args.test for l in gzip.open(f, 'rt'))
-    for _ in range(args.background):
+    aligned_pileups = shared_elements(
+        *((UnstrandedPileup(l) for l in gzip.open(f, 'rt')) for f in args.test))
+    i = 0
+    while i < 2_500_000:
         try:
-            base = next(bases)
-            alt_freq[base.ref].update(base.base_counts)
+            base = sum(next(aligned_pileups))
+            if base.ref != 'N':
+                alt_freq[base.ref].update(base.base_counts)
+                i += 1
         except StopIteration:
             break
     background_probs = {}
-    for base in alt_freq.keys():
+    for base in 'ACGT':
         total = sum(alt_freq[base].values())
         background_probs[base] = np.array(list({
             k: v / total
             for k, v in alt_freq[base].items()}.values()))
-    del(alt_freq, bases, base, total)
+    del(aligned_pileups, alt_freq, base, i, total)
 
     ###########################################################################
 
+    parser = StrandedPileup if args.stranded else UnstrandedPileup
     bases_significant, bases_scanned = 0, 0
 
-    if args.control and args.stranded:
-    # Stranded differential analysis with supplied control dataset
+    if args.control:
+    # Differential analysis pipeline
 
-        logger.info('Scanning for strand-specific differential base modification')
-        print('track name=edIted description="Stranded differential RNA modifications" useScore=1',
-            file=args.output, flush=True)
-        for test, ctrl in shared_elements(
-                (StrandedPileup(l) for f in args.test for l in gzip.open(f, 'rt')),
-                (StrandedPileup(l) for f in args.control for l in gzip.open(f, 'rt'))):
-            if (args.edit and test.ref != args.edit[0]) or test.ref not in 'ACGT':
+        if len(args.test) == 1 == len(args.control):
+            aligned_pileups = shared_elements(
+                (parser(l) for l in gzip.open(args.test[0], 'rt')),
+                (parser(l) for l in gzip.open(args.control[0], 'rt')))
+        else:
+            aligned_pileups = align_elements(
+                *((parser(l) for l in gzip.open(f, 'rt')) for f in args.test),
+                *((parser(l) for l in gzip.open(f, 'rt')) for f in args.control))
+
+        if args.stranded:
+            logger.info('Scanning for strand-specific differential base modification')
+            print('track name=edIted description="Stranded differential RNA modifications" useScore=1',
+                file=args.output, flush=True)
+        else:
+            logger.info('Scanning for differential base modification')
+            print('track name=edIted description="Unstranded differential RNA modifications" useScore=1',
+                file=args.output, flush=True)
+
+        for base_pileups in aligned_pileups:
+            if len(args.test) == 1 == len(args.control):
+                test_pileups, ctrl_pileups = base_pileups
+            else:
+                test_pileups = tuple(i for i in base_pileups[:len(args.test)] if i is not None)
+                ctrl_pileups = tuple(i for i in base_pileups[len(args.test):] if i is not None)
+                if len(test_pileups) < args.replicates or not ctrl_pileups:
+                    continue
+            if (args.edit and test_pileups[0].ref != args.edit[0]) or \
+                    test_pileups[0].ref not in 'ACGT':
                 continue
-            if differential_stranded(test, ctrl):
-                bases_significant += 1
-            bases_scanned += 1
-
-    elif args.control and not args.stranded:
-    # Unstranded differential analysis with supplied control dataset
-
-        logger.info('Scanning for differential base modification')
-        print('track name=edIted description="Unstranded differential RNA modifications" useScore=1',
-            file=args.output, flush=True)
-        for test, ctrl in shared_elements(
-                (UnstrandedPileup(l) for f in args.test for l in gzip.open(f, 'rt')),
-                (UnstrandedPileup(l) for f in args.control for l in gzip.open(f, 'rt'))):
-            if (args.edit and test.ref != args.edit[0]) or test.ref not in 'ACGT':
-                continue
-            if differential_unstranded(test, ctrl):
-                bases_significant += 1
-            bases_scanned += 1
-
-    elif not args.control and args.stranded:
-    # Detect stranded modifications only
-
-        logger.info('Scanning for strand-specific base modifications')
-        print('track name=edIted description="Stranded RNA modifications" useScore=1',
-            file=args.output, flush=True)
-        for test in (StrandedPileup(l) for f in args.test for l in gzip.open(f, 'rt')):
-            if (args.edit and test.ref != args.edit[0]) or test.ref not in 'ACGT':
-                continue
-            if detect_stranded(test):
+            if args.stranded:
+                if differential_stranded(test_pileups, ctrl_pileups):
+                    bases_significant += 1
+            elif differential_unstranded(test_pileups, ctrl_pileups):
                 bases_significant += 1
             bases_scanned += 1
 
     else:
-    # Detect unstranded modifications only
+    # Detect modifications only
 
-        logger.info('Scanning for base modifications')
-        print('track name=edIted description="Unstranded RNA modifications" useScore=1',
-            file=args.output, flush=True)
-        for test in (UnstrandedPileup(l) for f in args.test for l in gzip.open(f, 'rt')):
-            if (args.edit and test.ref != args.edit[0]) or test.ref not in 'ACGT':
+        if len(args.test) == 1:
+            aligned_pileups = ((parser(l),) for l in gzip.open(args.test[0], 'rt'))
+        else:
+            aligned_pileups = align_elements(
+                *((parser(l) for l in gzip.open(f, 'rt')) for f in args.test))
+
+        if args.stranded:
+            logger.info('Scanning for strand-specific base modifications')
+            print('track name=edIted description="Stranded RNA modifications" useScore=1',
+                file=args.output, flush=True)
+        else:
+            logger.info('Scanning for base modifications')
+            print('track name=edIted description="Unstranded RNA modifications" useScore=1',
+                file=args.output, flush=True)
+
+        for test_pileups in aligned_pileups:
+            if len(args.test) > 1:
+                test_pileups = tuple(i for i in base_pileups[:len(args.test)] if i is not None)
+                if len(test_pileups) < args.replicates:
+                    continue
+            if (args.edit and test_pileups[0].ref != args.edit[0]) or \
+                    test_pileups[0].ref not in 'ACGT':
                 continue
-            if detect_unstranded(test):
+            if args.stranded:
+                if detect_stranded(test_pileups):
+                    bases_significant += 1
+            elif detect_unstranded(test_pileups):
                 bases_significant += 1
             bases_scanned += 1
 

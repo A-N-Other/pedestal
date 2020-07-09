@@ -1,6 +1,6 @@
 # *pedestal*: A solid base for terminal bioinformatics
 
-A collection of bash wrappers and Python scripts that facilitate working in the terminal with sequence-based data.
+A collection of Python programs and Bash wrappers acrounds common UNIX tools that facilitate working in the terminal with sequence-based data.
 
 Requirements: Python >= 3.8
 
@@ -40,14 +40,14 @@ zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.
 
 [**`edIted`**](edIted): statistical comparison of RNA editing
 
-`edIted` performs assessments of RNA editing from samtools mpileup data, building on the Dirichlet-based models implemented in ACCUSA2 [Piechotta (2013) Bioinf, 10.1093/bioinformatics/btt268]. When run with test data alone, `edIted` detects base modification by comparing the goodness of fit of Dirchlet models of the base error (derived from the Phred quality data in the mpileup input) and the background error (derived empirically from a sample of the data) to the base frequencies recorded for the position. With an additional control dataset, `edIted` performs the above analysis to determine significantly edited sites and then tests for differential editing between the datasets by comparing the goodness of fit of Dirichlet models of the base error from the test and control datasets to their own and each other's base frequencies. Where aligners record this information in the BAM and samtools mpileup reports it (--output-extra XS), `edIted` can make use of stranding information to increase accuracy and allow the strand of the edited base to be output.
+`edIted` performs assessments of RNA editing from samtools mpileup data, building on the Dirichlet-based models implemented in ACCUSA2 [Piechotta (2013) Bioinf]. When run with test data alone, `edIted` runs in 'detect' mode, finding base modifications by comparing the goodness of fit of Dirchlet models of the base error (derived from the Phred quality data in the mpileup input) and the background sequencing error to the base frequencies recorded at a specific position. With an additional control dataset, `edIted` runs in 'differential' mode, performing the above analysis to determine significantly edited sites before additionally testing for differential editing by comparing the goodness of fit of Dirichlet models of the base error from the test and control datasets to their own and each other's base frequencies. Where aligners record this information in the BAM and samtools mpileup reports it (--output-extra XS), `edIted` will make use of stranding information to increase accuracy and allow the strand of the edited base to be output. `EdIted` reports Z score confidence values in both modes (BED6 format output), which are scaled to reflect the proportion of test dataset samples displaying editing when replicates are provided.
 ```bash
 edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-s] [-o OUTPUT]
-    [-e EDIT] [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-b BACKGROUND] [-q]
+    [-e EDIT] [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-r REPLICATES] [-q]
 --- usage examples ---
 samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra XS test.bam | awk '$4 > 1' | pigz > test.mpileup.gz
 edIted -e AG -s -t test.mpileup.gz > AG_edit_sites.bed
-edIted -e AG -s -t test.mpileup.gz -c control.mpileup.gz -o differential_edit_sites.bed
+edIted -e AG -s -t test1.mpileup.gz test2.mpileup.gz -c control.mpileup.gz -o differential_edit_sites.bed
 ```
 
 [**`explode`**](explode): split FASTA/Q records to new files
