@@ -714,7 +714,7 @@ if __name__ == '__main__':
 
         for test_pileups in aligned_pileups:
             if len(args.test) > 1:
-                test_pileups = tuple(i for i in base_pileups[:len(args.test)] if i is not None)
+                test_pileups = tuple(i for i in test_pileups[:len(args.test)] if i is not None)
                 if len(test_pileups) < args.replicates:
                     continue
             if (args.edit and test_pileups[0].ref != args.edit[0]) or \
