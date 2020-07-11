@@ -40,12 +40,13 @@ zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.
 
 [**`edIted`**](edIted): statistical comparison of RNA editing
 
-`edIted` performs stranded assessments of RNA editing from samtools mpileup data, building on the Dirichlet-based models implemented in ACCUSA2 [Piechotta (2013) Bioinf]. When run with test data alone, `edIted` runs in 'detect' mode, finding base modifications by comparing the goodness of fit of Dirchlet models of the base error (derived from the Phred quality data in the mpileup input) and the background sequencing error to the base frequencies recorded at a specific position. With an additional control dataset, `edIted` runs in 'differential' mode, performing the above analysis to determine significantly edited sites before additionally testing for differential editing by comparing the goodness of fit of Dirichlet models of the base error from the test and control datasets to their own and each other's base frequencies. When biological replicates are provided, `edIted` adjusts the reported Z score confidence values to reflect the proportion of test dataset samples displaying editing.
+`edIted` performs stranded assessments of RNA editing from samtools mpileup data, building on the Dirichlet-based models implemented in ACCUSA2 [Piechotta (2013) Bioinf]. When run with test data alone, `edIted` runs in 'detect' mode, finding base modifications by comparing the goodness of fit of Dirchlet models of the base error (derived from the Phred quality data in the mpileup input) and the background sequencing error to the base frequencies recorded at a specific position. With an additional control dataset, `edIted` runs in 'differential' mode, performing the above analysis to determine significantly edited sites before additionally testing for differential editing by comparing the goodness of fit of Dirichlet models of the base error from the test and control datasets to their own and each other's base frequencies. When biological replicates are provided, `edIted` adjusts the reported Z scores to reflect the proportion of test dataset samples displaying editing.
 
 Stranding information is required to run `edIted`! Data must come from the sequencing of stranded libraries, which can be used by spliced aligners to record the strand of the original RNA molecule (e.g. `--rna-strandedness` for `hisat2`). To include this information `samtools mpileup` data should be produced with `--output-extra XS`, the column location of which can be passed to `edIted` with `--xs` if necessary. Allowing `samtools mpileup` to calculate BAQs is recommended to further improve the accuracy of results.
 ```bash
-edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-o OUTPUT]
-    [-e EDIT] [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-r REPLICATES] [-q]
+edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-o OUTPUT] [-e EDIT]
+    [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-m MIN_EDITED]
+    [-r REPLICATES] [-xs XS] [-q]
 --- usage examples ---
 samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra XS test.bam | \
 awk '$4 > 1' | \
