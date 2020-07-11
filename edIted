@@ -21,8 +21,8 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.3'
-__stamp__ = 'GY200710'
+__version__ = '0.4'
+__stamp__ = 'GY200711'
 __status__ = 'Development'
 __license__ = 'MIT license'
 
@@ -160,14 +160,11 @@ class Pileup(object):
             self._parse()
             return self.depth(strand)
 
-    def is_potential_edit(self, strand: bool) -> bool:
+    def is_potential_edit(self, a: str, strand: bool) -> bool:
         try:
-            if strand:
-                return 0 < self[self.ref, True] < self.depth(True) \
-                    >= args.depth >= self.depth(False) * 0.01
-            else:
-                return 0 < self[rc[self.ref], False] < self.depth(False) \
-                    >= args.depth >= self.depth(True) * 0.01
+            d = self.depth(strand)
+            return 0 < self[a, strand] >= max(d * args.min_edited, args.alt_depth) \
+                and d >= self.depth(not strand) * 0.01
         except AttributeError:
             self._parse()
             return self.is_potential_edit(strand)
@@ -175,13 +172,10 @@ class Pileup(object):
     def a(self, strand: bool) -> np.ndarray:
         ''' unscaled alpha values for scipy.stats.dirichlet '''
         try:
-            if strand:
-                return np.array(list(
-                    (0.0 if k == self.ref else args.noise / 3) + (sum(v) / len(v) if v else 0.0)
-                    for k, v in self.base_probs[True].items()))
+            b = self.ref if strand else rc[self.ref]
             return np.array(list(
-                (0.0 if k == rc[self.ref] else args.noise / 3) + (sum(v) / len(v) if v else 0.0)
-                for k, v in self.base_probs[False].items()))
+                (0.0 if k == b else args.noise / 3) + (sum(v) / len(v) if v else 0.0)
+                for k, v in self.base_probs[strand].items()))
         except AttributeError:
             self._parse()
             return self.a(strand)
@@ -238,25 +232,24 @@ def align_elements(*inputs: Iterator, missing: Any=None) -> Iterator[tuple]:
         vals = [next(i) if v == low else v for i, v in zip(inputs, vals)]
 
 
-def detect(test_pileups: Tuple[Pileup], control_pileups: Tuple[Pileup]=tuple()) -> bool:
+def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     significant = False
-    test = sum(test_pileups)
+    strand = None
+    test = sum(tests)
     # determine which strand matches args.edit[0] and see if it's worth looking at
-    if test.ref == ref \
-            and test.is_potential_edit(True) \
-            and test[alt, True] >= args.alt_depth \
-            and (n_edited := sum(t[alt, True] > 0 for t in test_pileups)) >= args.replicates:
-        strand = True
-    elif test.ref == _ref \
-            and test.is_potential_edit(False) \
-            and test[alt, False] >= args.alt_depth \
-            and (n_edited := sum(t[alt, False] > 0 for t in test_pileups)) >= args.replicates:
-        strand = False
-    else:
+    if test.ref == ref:
+        if test.is_potential_edit(alt, True) \
+                and (n_edited := sum(t[alt, True] > 0 for t in tests)) >= args.reps:
+            strand = True
+    elif test.ref == _ref:
+        if test.is_potential_edit(alt, False) \
+                and (n_edited := sum(t[alt, False] > 0 for t in tests)) >= args.reps:
+            strand = False
+    if strand is None:
         return significant
     # if we're doing a differential assessment, check the control data
-    if control_pileups:
-        ctrl = sum(control_pileups)
+    if ctrls:
+        ctrl = sum(ctrls)
         if ctrl.depth(strand) < args.depth or \
                 ctrl[alt, strand] / ctrl.depth(strand) \
                 >= test[alt, strand] / test.depth(strand):
@@ -269,9 +262,9 @@ def detect(test_pileups: Tuple[Pileup], control_pileups: Tuple[Pileup]=tuple()) 
         Z = log10(
             dirichlet.pdf(test_x, test_a * scale) / \
             dirichlet.pdf(test_x, background_probs[ref] * scale))
-        Z *= n_edited / len(test_pileups)
+        Z *= n_edited / len(tests)
         if Z > args.z_score:
-            if control_pileups:
+            if ctrls:
                 # determine if the editing is differential
                 scale = min(test.depth(strand), ctrl.depth(strand))
                 test_a = test_a * scale
@@ -280,8 +273,8 @@ def detect(test_pileups: Tuple[Pileup], control_pileups: Tuple[Pileup]=tuple()) 
                 Z = log10(
                     (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a)) / \
                     (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
-                Z *= n_edited / len(test_pileups)
-                if Z > args.z_score :
+                Z *= n_edited / len(tests)
+                if Z > args.z_score:
                     print(
                         f'{test.chrom}\t'
                         f'{test.pos - 1}\t'  # BED6 is 0-based
@@ -325,8 +318,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '-c', '--control', nargs='+',
         help='optional control/untreated mpileup file(s), which will make \
-        edIted run a differential editing analysis rather than simply  \
-        identifing edited bases within the test dataset')
+        edIted run a differential editing analysis')
     parser.add_argument(
         '-o', '--output', type=FileType('w'), default=stdout,
         help='write output to this file instead of piping to stdout')
@@ -343,16 +335,20 @@ if __name__ == '__main__':
         Dirichlet models of nucleotide frequencies (default %(default)s)')
     parser.add_argument(
         '-d', '--depth', type=int, default=4,
-        help='minimum required coverage for a base to be considered (default \
+        help='required coverage for a base to be considered (default \
         %(default)s)')
     parser.add_argument(
         '-a', '--alt_depth', type=int, default=2,
-        help='minimum required alt count for editing to be considered \
-        (default %(default)s)')
+        help='minimum alt count for editing to be considered (see also \
+        `--min_edited`) (default %(default)s)')
     parser.add_argument(
-        '-r', '--replicates', type=int, default=1,
-        help='where replicates are given, the minimum number of replicates in \
-        which editing must be found (default %(default)s)')
+        '-m', '--min_edited', type=float, default=0.0,
+        help='minimum proportion (0 - <1) of bases at a site that must display \
+        editing (see also `--alt_depth`) (default %(default)s)')
+    parser.add_argument(
+        '-r', '--reps', type=int, default=1,
+        help='where replicates are given, the minimum number in which editing \
+        must be found (default %(default)s)')
     parser.add_argument(
         '--xs', type=int, default=7,
         help='column in the mpileup inputs in which the XS (stranding) data \
@@ -368,6 +364,8 @@ if __name__ == '__main__':
         help='silence progress reporting')
     args = parser.parse_args()
 
+    if not 0.0 <= args.min_edited < 1.0:
+        raise ValueError('--min_edited must be >=0.0 & <1.0')
     args.edit = args.edit.upper()
     if len(args.edit) != 2:
         raise ValueError('--edit must be passed two nucleotides, e.g. "AG"')
@@ -394,14 +392,12 @@ if __name__ == '__main__':
     alt_freq = {k: Counter({'A': 0, 'C': 0, 'G': 0, 'T': 0}) for k in 'ACGT'}
     aligned_pileups = shared_elements(
         *((Pileup(l) for l in gzip.open(f, 'rt')) for f in args.test))
-    i = 0
-    while i < 2_500_000:
+    for _ in range(2_500_000):
         try:
             base = sum(next(aligned_pileups))
             if base.ref != 'N':
                 alt_freq[base.ref].update(base.base_counts[True])
                 alt_freq[rc[base.ref]].update(base.base_counts[False])
-                i += 1
         except StopIteration:
             break
     background_probs = {}
@@ -410,7 +406,7 @@ if __name__ == '__main__':
         background_probs[base] = np.array(list({
             k: (v / total) + (0.0 if k == base else args.noise / 3)
             for k, v in alt_freq[base].items()}.values()))
-    del(aligned_pileups, alt_freq, base, i, total)
+    del(aligned_pileups, alt_freq, base, total)
 
     ###########################################################################
 
@@ -438,7 +434,7 @@ if __name__ == '__main__':
             for base_pileups in aligned_pileups:
                 test_pileups = tuple(i for i in base_pileups[:len(args.test)] if i is not None)
                 ctrl_pileups = tuple(i for i in base_pileups[len(args.test):] if i is not None)
-                if len(test_pileups) < args.replicates \
+                if len(test_pileups) < args.reps \
                         or not ctrl_pileups \
                         or test_pileups[0].ref not in ref_bases:
                     continue
@@ -462,7 +458,7 @@ if __name__ == '__main__':
             for test_pileups in align_elements(
                     *((Pileup(l) for l in gzip.open(f, 'rt')) for f in args.test)):
                 test_pileups = tuple(i for i in test_pileups[:len(args.test)] if i is not None)
-                if len(test_pileups) < args.replicates \
+                if len(test_pileups) < args.reps \
                         or test_pileups[0].ref not in ref_bases:
                     continue
                 if detect(test_pileups):
