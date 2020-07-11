@@ -164,7 +164,7 @@ class Pileup(object):
         try:
             d = self.depth(strand)
             return 0 < self[a, strand] >= max(d * args.min_edited, args.alt_depth) \
-                and d >= self.depth(not strand) * 0.01
+                and args.depth <= d >= self.depth(not strand) * 0.01
         except AttributeError:
             self._parse()
             return self.is_potential_edit(strand)
@@ -234,18 +234,19 @@ def align_elements(*inputs: Iterator, missing: Any=None) -> Iterator[tuple]:
 
 def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     significant = False
-    strand = None
     test = sum(tests)
     # determine which strand matches args.edit[0] and see if it's worth looking at
-    if test.ref == ref:
-        if test.is_potential_edit(alt, True) \
-                and (n_edited := sum(t[alt, True] > 0 for t in tests)) >= args.reps:
-            strand = True
-    elif test.ref == _ref:
-        if test.is_potential_edit(alt, False) \
-                and (n_edited := sum(t[alt, False] > 0 for t in tests)) >= args.reps:
-            strand = False
-    if strand is None:
+    if test.ref == ref \
+            and test.is_potential_edit(alt, True) \
+            and (n_edited := 1 if len(tests) == 1 else
+                sum(t[alt, True] > 0 for t in tests)) >= args.reps:
+        strand = True
+    elif test.ref == _ref \
+            and test.is_potential_edit(alt, False) \
+            and (n_edited := 1 if len(tests) == 1 else
+                sum(t[alt, False] > 0 for t in tests)) >= args.reps:
+        strand = False
+    else:
         return significant
     # if we're doing a differential assessment, check the control data
     if ctrls:
@@ -260,8 +261,8 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
         test_x = test.x(strand)
         test_a = test.a(strand)
         Z = log10(
-            dirichlet.pdf(test_x, test_a * scale) / \
-            dirichlet.pdf(test_x, background_probs[ref] * scale))
+            dirichlet.pdf(test_x, test_a * scale)
+            / dirichlet.pdf(test_x, background_probs[ref] * scale))
         Z *= n_edited / len(tests)
         if Z > args.z_score:
             if ctrls:
@@ -271,8 +272,8 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                 ctrl_x = ctrl.x(strand)
                 ctrl_a = ctrl.a(strand) * scale
                 Z = log10(
-                    (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a)) / \
-                    (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
+                    (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a))
+                    / (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
                 Z *= n_edited / len(tests)
                 if Z > args.z_score:
                     print(
@@ -343,8 +344,8 @@ if __name__ == '__main__':
         `--min_edited`) (default %(default)s)')
     parser.add_argument(
         '-m', '--min_edited', type=float, default=0.0,
-        help='minimum proportion (0 - <1) of bases at a site that must display \
-        editing (see also `--alt_depth`) (default %(default)s)')
+        help='minimum proportion (0 - <1) of bases at a site that must \
+        display editing (see also `--alt_depth`) (default %(default)s)')
     parser.add_argument(
         '-r', '--reps', type=int, default=1,
         help='where replicates are given, the minimum number in which editing \
@@ -391,7 +392,7 @@ if __name__ == '__main__':
     logger.info('Determining background error rates')
     alt_freq = {k: Counter({'A': 0, 'C': 0, 'G': 0, 'T': 0}) for k in 'ACGT'}
     aligned_pileups = shared_elements(
-        *((Pileup(l) for l in gzip.open(f, 'rt')) for f in args.test))
+        *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test))
     for _ in range(2_500_000):
         try:
             base = sum(next(aligned_pileups))
@@ -421,19 +422,21 @@ if __name__ == '__main__':
 
         if len(args.test) == 1 == len(args.control):
             for test_pileups, ctrl_pileups in shared_elements(
-                    (Pileup(l) for l in gzip.open(args.test[0], 'rt')),
-                    (Pileup(l) for l in gzip.open(args.control[0], 'rt'))):
+                    (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
+                    (Pileup(line) for line in gzip.open(args.control[0], 'rt'))):
                 if test_pileups[0].ref not in ref_bases:
                     continue
                 if detect(test_pileups, ctrl_pileups):
                     significant_bases += 1
         else:
             aligned_pileups = align_elements(
-                *((Pileup(l) for l in gzip.open(f, 'rt')) for f in args.test),
-                *((Pileup(l) for l in gzip.open(f, 'rt')) for f in args.control))
+                *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test),
+                *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.control))
             for base_pileups in aligned_pileups:
-                test_pileups = tuple(i for i in base_pileups[:len(args.test)] if i is not None)
-                ctrl_pileups = tuple(i for i in base_pileups[len(args.test):] if i is not None)
+                test_pileups = \
+                    tuple(i for i in base_pileups[:len(args.test)] if i is not None)
+                ctrl_pileups = \
+                    tuple(i for i in base_pileups[len(args.test):] if i is not None)
                 if len(test_pileups) < args.reps \
                         or not ctrl_pileups \
                         or test_pileups[0].ref not in ref_bases:
@@ -449,15 +452,16 @@ if __name__ == '__main__':
             file=args.output, flush=True)
 
         if len(args.test) == 1:
-            for test_pileups in ((Pileup(l),) for l in gzip.open(args.test[0], 'rt')):
+            for test_pileups in ((Pileup(line),) for line in gzip.open(args.test[0], 'rt')):
                 if test_pileups[0].ref not in ref_bases:
                     continue
                 if detect(test_pileups):
                     significant_bases += 1
         else:
             for test_pileups in align_elements(
-                    *((Pileup(l) for l in gzip.open(f, 'rt')) for f in args.test)):
-                test_pileups = tuple(i for i in test_pileups[:len(args.test)] if i is not None)
+                    *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test)):
+                test_pileups = \
+                    tuple(i for i in test_pileups[:len(args.test)] if i is not None)
                 if len(test_pileups) < args.reps \
                         or test_pileups[0].ref not in ref_bases:
                     continue
