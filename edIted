@@ -53,25 +53,27 @@ class Pileup(object):
     ''' A class for holding per-base stranded mpileup data '''
 
     def __init__(self, mpileup: str) -> None:
-        self.chrom, pos, self.ref, *self.mpileup = mpileup.strip().split('\t')
-        self.pos = int(pos)
+        self.mpileup = mpileup.strip().split('\t')
+        self.chrom = self.mpileup[0]
+        self.pos = int(self.mpileup[1])
+        self.ref = self.mpileup[2]
 
     def _parse(self) -> None:
-        xs = args.xs - 6 - 1  # take 1 for 0-based indexing of list
         self.base_counts = {
             True: {'A': 0, 'C': 0, 'G': 0, 'T': 0},
             False: {'A': 0, 'C': 0, 'G': 0, 'T': 0}}
         self.base_probs = {
             True: {'A': [], 'C': [], 'G': [], 'T': []},
             False: {'A': [], 'C': [], 'G': [], 'T': []}}
-        _, mapping, quals, *self.mpileup = self.mpileup
+        mapping = self.mpileup[4]
+        quals = self.mpileup[5]
         try:
-            strand = self.mpileup[xs].split(',')
-            if any(s not in '+-' for s in strand):
+            strand = self.mpileup[args.xs - 1].split(',')
+            if strand[0] not in '+-':
                 raise
-            strand = [True if s == '+' else False for s in strand]
         except:
             raise ValueError('check the position of the `xs` information in the mpileup')
+        strand = [True if s == '+' else False for s in strand]
         i, j = 0, 0
         while i < len(mapping):
             if mapping[i] in '.,ACGTacgt':
@@ -96,7 +98,6 @@ class Pileup(object):
                 result = indel_re.match(mapping, i + 1)
                 length = int(mapping[result.start():result.end()])
                 i = result.end() + length
-        del(self.mpileup)
 
     def _is_valid_operand(self, other: object) -> bool:
         return type(self) == type(other) and \
