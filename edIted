@@ -21,8 +21,8 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.4'
-__stamp__ = 'GY200711'
+__version__ = '0.5'
+__stamp__ = 'GY200728'
 __status__ = 'Development'
 __license__ = 'MIT license'
 
@@ -235,6 +235,10 @@ def align_elements(*inputs: Iterator, missing: Any=None) -> Iterator[tuple]:
 
 def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     significant = False
+    if max(
+            min(t.depth(True) for t in tests),
+            min(t.depth(False) for t in tests)) < args.depth:
+        return significant
     test = sum(tests)
     # determine which strand matches args.edit[0] and see if it's worth looking at
     if test.ref == ref \
@@ -281,7 +285,9 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                         f'{test.chrom}\t'
                         f'{test.pos - 1}\t'  # BED6 is 0-based
                         f'{test.pos}\t'
-                        f'{ref}{alt}\t'
+                        f'{ref}{alt}'
+                        f'_{test[alt, strand]}_{test.depth(strand)}'
+                        f'_{ctrl[alt, strand]}_{ctrl.depth(strand)}\t'
                         f'{Z:.3f}\t'
                         f'{"+" if strand else "-"}',
                         file=args.output, flush=True)
@@ -291,7 +297,7 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                     f'{test.chrom}\t'
                     f'{test.pos - 1}\t'  # BED6 is 0-based
                     f'{test.pos}\t'
-                    f'{ref}{alt}\t'
+                    f'{ref}{alt}_{test[alt, strand]}_{test.depth(strand)}\t'
                     f'{Z:.3f}\t'
                     f'{"+" if strand else "-"}',
                     file=args.output, flush=True)
@@ -337,8 +343,8 @@ if __name__ == '__main__':
         Dirichlet models of nucleotide frequencies (default %(default)s)')
     parser.add_argument(
         '-d', '--depth', type=int, default=4,
-        help='required coverage for a base to be considered (default \
-        %(default)s)')
+        help='required coverage (in each sample if biological replicates are \
+        provided) for a base to be considered (default %(default)s)')
     parser.add_argument(
         '-a', '--alt_depth', type=int, default=2,
         help='minimum alt count for editing to be considered (see also \
