@@ -21,7 +21,7 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.5'
+__version__ = '0.6'
 __stamp__ = 'GY200728'
 __status__ = 'Development'
 __license__ = 'MIT license'
@@ -234,32 +234,31 @@ def align_elements(*inputs: Iterator, missing: Any=None) -> Iterator[tuple]:
 
 
 def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
-    significant = False
-    if max(
-            min(t.depth(True) for t in tests),
-            min(t.depth(False) for t in tests)) < args.depth:
-        return significant
-    test = sum(tests)
+    ''' Conduct comparisons of Dirichlet models of base frequency to determine
+    if a site is edited or, with control data, differentially edited '''
+    strand = None
     # determine which strand matches args.edit[0] and see if it's worth looking at
-    if test.ref == ref \
-            and test.is_potential_edit(alt, True) \
-            and (n_edited := 1 if len(tests) == 1 else
-                sum(t[alt, True] > 0 for t in tests)) >= args.reps:
-        strand = True
-    elif test.ref == _ref \
-            and test.is_potential_edit(alt, False) \
-            and (n_edited := 1 if len(tests) == 1 else
-                sum(t[alt, False] > 0 for t in tests)) >= args.reps:
-        strand = False
-    else:
-        return significant
+    if test.ref == ref and all(t.depth(True) >= args.depth for t in tests):
+        test = sum(tests)
+        if test.is_potential_edit(alt, True) \
+                and (n_edited := 1 if len(tests) == 1 else
+                    sum(t[alt, True] > 0 for t in tests)) >= args.reps:
+            strand = True
+    elif test.ref == _ref and all(t.depth(False) >= args.depth for t in tests):
+        test = sum(tests)
+        if test.is_potential_edit(alt, False) \
+                and (n_edited := 1 if len(tests) == 1 else
+                    sum(t[alt, False] > 0 for t in tests)) >= args.reps:
+            strand = False
+    if strand is None:
+        return False
     # if we're doing a differential assessment, check the control data
     if ctrls:
         ctrl = sum(ctrls)
         if ctrl.depth(strand) < args.depth or \
                 ctrl[alt, strand] / ctrl.depth(strand) \
                 >= test[alt, strand] / test.depth(strand):
-            return significant
+            return False
     try:
         # determine if the base displays significant editing
         scale = test.depth(strand)
@@ -291,7 +290,7 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                         f'{Z:.3f}\t'
                         f'{"+" if strand else "-"}',
                         file=args.output, flush=True)
-                    significant = True
+                    return True
             else:
                 print(
                     f'{test.chrom}\t'
@@ -301,11 +300,10 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                     f'{Z:.3f}\t'
                     f'{"+" if strand else "-"}',
                     file=args.output, flush=True)
-                significant = True
+                return True
     except ValueError:
         # Swallow occasional numpy math errors
         pass
-    return significant
 
 
 ###############################################################################
@@ -431,9 +429,8 @@ if __name__ == '__main__':
             for test_pileups, ctrl_pileups in shared_elements(
                     (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
                     (Pileup(line) for line in gzip.open(args.control[0], 'rt'))):
-                if test_pileups[0].ref not in ref_bases:
-                    continue
-                if detect(test_pileups, ctrl_pileups):
+                if test_pileups[0].ref in ref_bases \
+                        and detect(test_pileups, ctrl_pileups):
                     significant_bases += 1
         else:
             aligned_pileups = align_elements(
@@ -442,13 +439,12 @@ if __name__ == '__main__':
             for base_pileups in aligned_pileups:
                 test_pileups = \
                     tuple(i for i in base_pileups[:len(args.test)] if i is not None)
+                if test_pileups[0].ref not in ref_bases \
+                        or len(test_pileups) < args.reps:
+                    continue
                 ctrl_pileups = \
                     tuple(i for i in base_pileups[len(args.test):] if i is not None)
-                if len(test_pileups) < args.reps \
-                        or not ctrl_pileups \
-                        or test_pileups[0].ref not in ref_bases:
-                    continue
-                if detect(test_pileups, ctrl_pileups):
+                if ctrl_pileups and detect(test_pileups, ctrl_pileups):
                     significant_bases += 1
 
     else:
@@ -460,19 +456,16 @@ if __name__ == '__main__':
 
         if len(args.test) == 1:
             for test_pileups in ((Pileup(line),) for line in gzip.open(args.test[0], 'rt')):
-                if test_pileups[0].ref not in ref_bases:
-                    continue
-                if detect(test_pileups):
+                if test_pileups[0].ref in ref_bases and detect(test_pileups):
                     significant_bases += 1
         else:
             for test_pileups in align_elements(
                     *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test)):
                 test_pileups = \
                     tuple(i for i in test_pileups[:len(args.test)] if i is not None)
-                if len(test_pileups) < args.reps \
-                        or test_pileups[0].ref not in ref_bases:
-                    continue
-                if detect(test_pileups):
+                if test_pileups[0].ref in ref_bases \
+                        and len(test_pileups) >= args.reps \
+                        and detect(test_pileups):
                     significant_bases += 1
 
     ###########################################################################
