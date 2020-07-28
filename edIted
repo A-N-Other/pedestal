@@ -238,13 +238,13 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     if a site is edited or, with control data, differentially edited '''
     strand = None
     # determine which strand matches args.edit[0] and see if it's worth looking at
-    if test.ref == ref and all(t.depth(True) >= args.depth for t in tests):
+    if tests[0].ref == ref and all(t.depth(True) >= args.depth for t in tests):
         test = sum(tests)
         if test.is_potential_edit(alt, True) \
                 and (n_edited := 1 if len(tests) == 1 else
                     sum(t[alt, True] > 0 for t in tests)) >= args.reps:
             strand = True
-    elif test.ref == _ref and all(t.depth(False) >= args.depth for t in tests):
+    elif tests[0].ref == _ref and all(t.depth(False) >= args.depth for t in tests):
         test = sum(tests)
         if test.is_potential_edit(alt, False) \
                 and (n_edited := 1 if len(tests) == 1 else
