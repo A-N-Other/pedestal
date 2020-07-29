@@ -6,6 +6,7 @@ import gzip
 import logging
 import re
 from argparse import ArgumentParser, FileType
+from bisect import bisect
 from collections import Counter, defaultdict as dd
 from functools import total_ordering
 from itertools import chain
@@ -206,6 +207,47 @@ class Pileup(object):
             return self.__str__()
 
 
+class Blacklist(object):
+    ''' A class for holding blacklisted regions '''
+
+    def __init__(self) -> None:
+        self.blacklist = dd(list)
+
+    def update(self, chrom: str, start: int, stop: int) -> None:
+        left = right = bisect(self.blacklist[chrom], (start, stop))
+        # print(left, right, start, stop)
+        if right != len(self.blacklist[chrom]):
+            if start == self.blacklist[chrom][right][0]:
+                # completely contained already
+                return
+            else:
+                # stretch rightwards to cover overlapping regions
+                while right != len(self.blacklist[chrom]) \
+                        and stop >= self.blacklist[chrom][right][0]:
+                    stop = max(stop, self.blacklist[chrom][right][1])
+                    right += 1
+        if left > 0 and start <= self.blacklist[chrom][left - 1][1]:
+            # stretch leftwards to cover overlapping regions
+            left -= 1
+            start = self.blacklist[chrom][left][0]
+            stop = max(stop, self.blacklist[chrom][left][1])
+        if left == right:
+            self.blacklist[chrom].insert(left, (start, stop))
+        else:
+            self.blacklist[chrom][left:right] = [(start, stop)]
+
+    def __contains__(self, key) -> bool:
+        chrom, pos = key
+        try:
+            loc = bisect(self.blacklist[chrom], (pos, pos))
+            if self.blacklist[chrom][loc - 1][1] >= pos \
+                    or self.blacklist[chrom][loc][0] == pos:
+                return True
+        except (KeyError, IndexError) as e:
+            pass
+        return False
+
+
 # Functions ###################################################################
 
 
@@ -404,12 +446,14 @@ if __name__ == '__main__':
 
     if args.blacklist:
         logger.info('Preparing blacklist')
-        blacklist = dd(set)
+        blacklisted_regions = 0
+        B = Blacklist()
         for f in args.blacklist:
             for chrom, start, stop, *_ in \
                     (line.strip().split() for line in gzip.open(f, 'rt')):
-                blacklist[chrom].update(range(start + 1, stop + 1))
-        logger.info(f'{sum(len(v) for v in blacklist.values())} sites blacklisted')
+                B.update(chrom, int(start) + 1, int(stop))
+                blacklisted_regions += 1
+        logger.info(f'Blacklist prepared from {blacklisted_regions} regions')
 
     ###########################################################################
 
@@ -445,34 +489,28 @@ if __name__ == '__main__':
               file=args.output, flush=True)
 
         if len(args.test) == 1 == len(args.control):
-            for test_pileups, ctrl_pileups in shared_elements(
-                    (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
-                    (Pileup(line) for line in gzip.open(args.control[0], 'rt'))):
-                if test_pileups[0].ref in ref_bases \
-                        and (not args.blacklist or test_pileups[0].pos
-                             not in blacklist[test_pileups[0].chrom]) \
-                        and detect(test_pileups, ctrl_pileups):
-                    significant_bases += 1
+            aligned_pileups = shared_elements(
+                (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
+                (Pileup(line) for line in gzip.open(args.control[0], 'rt')))
         else:
             aligned_pileups = align_elements(
                 *((Pileup(line) for line in gzip.open(f, 'rt'))
                     for f in args.test),
                 *((Pileup(line) for line in gzip.open(f, 'rt'))
                     for f in args.control))
-            for base_pileups in aligned_pileups:
-                test_pileups = \
-                    tuple(i for i in base_pileups[:len(args.test)]
-                          if i is not None)
-                if len(test_pileups) < args.reps \
-                        or (args.blacklist and test_pileups[0].pos
-                            in blacklist[test_pileups[0].chrom]) \
-                        or test_pileups[0].ref not in ref_bases:
-                    continue
-                ctrl_pileups = \
-                    tuple(i for i in base_pileups[len(args.test):]
-                          if i is not None)
-                if ctrl_pileups and detect(test_pileups, ctrl_pileups):
-                    significant_bases += 1
+        for base_pileup in aligned_pileups:
+            test_pileup = \
+                tuple(i for i in base_pileup[:len(args.test)] if i is not None)
+            if len(test_pileup) < args.reps \
+                    or test_pileup[0].ref not in ref_bases \
+                    or (args.blacklist
+                        and (test_pileup[0].chrom, test_pileup[0].pos) in B):
+                continue
+            ctrl_pileups = \
+                tuple(i for i in base_pileup[len(args.test):]
+                      if i is not None)
+            if ctrl_pileups and detect(test_pileup, ctrl_pileups):
+                significant_bases += 1
 
     else:
         # Detect modifications only
@@ -482,25 +520,22 @@ if __name__ == '__main__':
             file=args.output, flush=True)
 
         if len(args.test) == 1:
-            for test_pileups in ((Pileup(line),) for line in gzip.open(args.test[0], 'rt')):
-                if test_pileups[0].ref in ref_bases \
-                        and (not args.blacklist or test_pileups[0].pos
-                             not in blacklist[test_pileups[0].chrom]) \
-                        and detect(test_pileups):
-                    significant_bases += 1
+            aligned_pileups = \
+                ((Pileup(line),) for line in gzip.open(args.test[0], 'rt'))
         else:
-            for test_pileups in align_elements(
-                    *((Pileup(line) for line in gzip.open(f, 'rt'))
-                        for f in args.test)):
-                test_pileups = \
-                    tuple(i for i in test_pileups[:len(args.test)]
-                          if i is not None)
-                if len(test_pileups) >= args.reps \
-                        and test_pileups[0].ref in ref_bases \
-                        and (not args.blacklist or test_pileups[0].pos
-                             not in blacklist[test_pileups[0].chrom]) \
-                        and detect(test_pileups):
-                    significant_bases += 1
+            aligned_pileups = align_elements(
+                *((Pileup(line) for line in gzip.open(f, 'rt'))
+                    for f in args.test))
+        for base_pileup in aligned_pileups:
+            base_pileup = \
+                tuple(i for i in base_pileup[:len(args.test)]
+                      if i is not None)
+            if len(base_pileup) >= args.reps \
+                    and base_pileup[0].ref in ref_bases \
+                    and (not args.blacklist \
+                        or (base_pileup[0].chrom, base_pileup[0].pos) not in B) \
+                    and detect(base_pileup):
+                significant_bases += 1
 
     ###########################################################################
 
