@@ -6,7 +6,7 @@ import gzip
 import logging
 import re
 from argparse import ArgumentParser, FileType
-from collections import Counter
+from collections import Counter, defaultdict as dd
 from functools import total_ordering
 from itertools import chain
 from math import log10, pow
@@ -21,7 +21,7 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.6'
+__version__ = '0.7'
 __stamp__ = 'GY200729'
 __status__ = 'Development'
 __license__ = 'MIT license'
@@ -72,7 +72,8 @@ class Pileup(object):
             if strand[0] not in '+-':
                 raise
         except:
-            raise ValueError('check the position of the `xs` information in the mpileup')
+            raise ValueError(
+                'check the position of the `xs` information in the mpileup')
         strand = [True if s == '+' else False for s in strand]
         i, j = 0, 0
         while i < len(mapping):
@@ -142,7 +143,8 @@ class Pileup(object):
                     obj.base_counts[strand][base] = \
                         self[base, strand] + other[base, strand]
                     obj.base_probs[strand][base] = \
-                        self.base_probs[strand][base] + other.base_probs[strand][base]
+                        self.base_probs[strand][base] + \
+                        other.base_probs[strand][base]
             return obj
         else:
             raise ValueError('Pileup objects do not refer to the same position')
@@ -156,7 +158,8 @@ class Pileup(object):
         try:
             if strand is not None:
                 return sum(self.base_counts[strand].values())
-            return sum(v2 for v in self.base_counts.values() for v2 in v.values())
+            return sum(v2 for v in self.base_counts.values()
+                       for v2 in v.values())
         except AttributeError:
             self._parse()
             return self.depth(strand)
@@ -237,18 +240,20 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     ''' Conduct comparisons of Dirichlet models of base frequency to determine
     if a site is edited or, with control data, differentially edited '''
     strand = None
-    # determine which strand matches args.edit[0] and see if it's worth looking at
-    if tests[0].ref == ref and all(t.depth(True) >= args.depth for t in tests):
+    # determine which strand matches args.edit[0] and check potential edits
+    if tests[0].ref == ref \
+            and all(t.depth(True) >= args.depth for t in tests):
         test = sum(tests)
         if test.is_potential_edit(alt, True) \
                 and (n_edited := 1 if len(tests) == 1 else
-                    sum(t[alt, True] > 0 for t in tests)) >= args.reps:
+                     sum(t[alt, True] > 0 for t in tests)) >= args.reps:
             strand = True
-    elif tests[0].ref == _ref and all(t.depth(False) >= args.depth for t in tests):
+    elif tests[0].ref == _ref \
+            and all(t.depth(False) >= args.depth for t in tests):
         test = sum(tests)
         if test.is_potential_edit(alt, False) \
                 and (n_edited := 1 if len(tests) == 1 else
-                    sum(t[alt, False] > 0 for t in tests)) >= args.reps:
+                     sum(t[alt, False] > 0 for t in tests)) >= args.reps:
             strand = False
     if strand is None:
         return False
@@ -282,7 +287,7 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                 if Z > args.z_score:
                     print(
                         f'{test.chrom}\t'
-                        f'{test.pos - 1}\t'  # BED6 is 0-based
+                        f'{test.pos - 1}\t'  # half-open 0-based ... [0,1)
                         f'{test.pos}\t'
                         f'{ref}{alt}'
                         f'_{test[alt, strand]}_{test.depth(strand)}'
@@ -294,7 +299,7 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
             else:
                 print(
                     f'{test.chrom}\t'
-                    f'{test.pos - 1}\t'  # BED6 is 0-based
+                    f'{test.pos - 1}\t'  # half-open 0-based ... [0,1)
                     f'{test.pos}\t'
                     f'{ref}{alt}_{test[alt, strand]}_{test.depth(strand)}\t'
                     f'{Z:.3f}\t'
@@ -359,9 +364,10 @@ if __name__ == '__main__':
         '--xs', type=int, default=7,
         help='column in the mpileup inputs in which the XS (stranding) data \
         can be found (default %(default)s)')
-    # parser.add_argument(
-    #     '-b', '--blacklist', nargs='+',
-    #     help='regions (BED format) to exclude from analyses')
+    parser.add_argument(
+        '-b', '--blacklist', nargs='+',
+        help='file(s) containing regions (BED format) to exclude from \
+        analyses, e.g. splice sites, ENCODE blacklisted regions, etc')
     # parser.add_argument(
     #     '-v', '--vcf', nargs='+',
     #     help='known variations (VCF format) to exclude from analyses')
@@ -372,6 +378,8 @@ if __name__ == '__main__':
 
     if not 0.0 <= args.min_edited < 1.0:
         raise ValueError('--min_edited must be >=0.0 & <1.0')
+    if not 0 < args.reps <= len(args.test):
+        raise ValueError('--reps must be >= 1 & <= number of test replicates')
     args.edit = args.edit.upper()
     if len(args.edit) != 2:
         raise ValueError('--edit must be passed two nucleotides, e.g. "AG"')
@@ -391,6 +399,17 @@ if __name__ == '__main__':
         level=logging.ERROR if args.quiet else logging.INFO,
         handlers=[logstream])
     logger.info(f'edIted v{__version__}_{__stamp__} ({__status__})')
+
+    ###########################################################################
+
+    if args.blacklist:
+        logger.info('Preparing blacklist')
+        blacklist = dd(set)
+        for f in args.blacklist:
+            for chrom, start, stop, *_ in \
+                    (line.strip().split() for line in gzip.open(f, 'rt')):
+                blacklist[chrom].update(range(start + 1, stop + 1))
+        logger.info(f'{sum(len(v) for v in blacklist.values())} sites blacklisted')
 
     ###########################################################################
 
@@ -419,36 +438,44 @@ if __name__ == '__main__':
     significant_bases = 0
 
     if args.control:
-    # Differential analysis pipeline
+        # Differential analysis pipeline
 
         logger.info('Scanning for strand-specific differential base modification')
         print('track name=edIted description="Stranded differential RNA modifications" useScore=1',
-            file=args.output, flush=True)
+              file=args.output, flush=True)
 
         if len(args.test) == 1 == len(args.control):
             for test_pileups, ctrl_pileups in shared_elements(
                     (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
                     (Pileup(line) for line in gzip.open(args.control[0], 'rt'))):
                 if test_pileups[0].ref in ref_bases \
+                        and (not args.blacklist or test_pileups[0].pos
+                             not in blacklist[test_pileups[0].chrom]) \
                         and detect(test_pileups, ctrl_pileups):
                     significant_bases += 1
         else:
             aligned_pileups = align_elements(
-                *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test),
-                *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.control))
+                *((Pileup(line) for line in gzip.open(f, 'rt'))
+                    for f in args.test),
+                *((Pileup(line) for line in gzip.open(f, 'rt'))
+                    for f in args.control))
             for base_pileups in aligned_pileups:
                 test_pileups = \
-                    tuple(i for i in base_pileups[:len(args.test)] if i is not None)
+                    tuple(i for i in base_pileups[:len(args.test)]
+                          if i is not None)
                 if len(test_pileups) < args.reps \
+                        or (args.blacklist and test_pileups[0].pos
+                            in blacklist[test_pileups[0].chrom]) \
                         or test_pileups[0].ref not in ref_bases:
                     continue
                 ctrl_pileups = \
-                    tuple(i for i in base_pileups[len(args.test):] if i is not None)
+                    tuple(i for i in base_pileups[len(args.test):]
+                          if i is not None)
                 if ctrl_pileups and detect(test_pileups, ctrl_pileups):
                     significant_bases += 1
 
     else:
-    # Detect modifications only
+        # Detect modifications only
 
         logger.info('Scanning for strand-specific base modifications')
         print('track name=edIted description="Stranded RNA modifications" useScore=1',
@@ -456,15 +483,22 @@ if __name__ == '__main__':
 
         if len(args.test) == 1:
             for test_pileups in ((Pileup(line),) for line in gzip.open(args.test[0], 'rt')):
-                if test_pileups[0].ref in ref_bases and detect(test_pileups):
+                if test_pileups[0].ref in ref_bases \
+                        and (not args.blacklist or test_pileups[0].pos
+                             not in blacklist[test_pileups[0].chrom]) \
+                        and detect(test_pileups):
                     significant_bases += 1
         else:
             for test_pileups in align_elements(
-                    *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test)):
+                    *((Pileup(line) for line in gzip.open(f, 'rt'))
+                        for f in args.test)):
                 test_pileups = \
-                    tuple(i for i in test_pileups[:len(args.test)] if i is not None)
+                    tuple(i for i in test_pileups[:len(args.test)]
+                          if i is not None)
                 if len(test_pileups) >= args.reps \
                         and test_pileups[0].ref in ref_bases \
+                        and (not args.blacklist or test_pileups[0].pos
+                             not in blacklist[test_pileups[0].chrom]) \
                         and detect(test_pileups):
                     significant_bases += 1
 
