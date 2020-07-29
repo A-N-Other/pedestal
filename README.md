@@ -46,14 +46,14 @@ Stranding information is required to run `edIted`! Data must come from the seque
 ```bash
 edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-o OUTPUT] [-e EDIT]
     [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-m MIN_EDITED]
-    [-r REPLICATES] [-xs XS] [-q]
+    [-r REPLICATES] [-b BLACKLIST [BLACKLIST ...]] [-xs XS] [-q]
 --- usage examples ---
 samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra XS test.bam | \
 awk '$4 > 1' | \
 pigz > test.mpileup.gz
 
-edIted -e TC -t test.mpileup.gz > TC_edit_sites.bed
-edIted -r 2 -t test1.mpileup.gz test2.mpileup -c control.mpileup.gz -o differential_AG_edit_sites.bed
+edIted -e TC -m 0.2 -t test.mpileup.gz -b blacklists/*.bed.gz > TC_edit_sites.bed
+edIted -r 2 -d 10 -t test1.mpileup.gz test2.mpileup -c control.mpileup.gz -o differential_AG_edit_sites.bed
 ```
 
 [**`explode`**](explode): split FASTA/Q records to new files
