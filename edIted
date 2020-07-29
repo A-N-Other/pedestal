@@ -439,8 +439,8 @@ if __name__ == '__main__':
             for base_pileups in aligned_pileups:
                 test_pileups = \
                     tuple(i for i in base_pileups[:len(args.test)] if i is not None)
-                if test_pileups[0].ref not in ref_bases \
-                        or len(test_pileups) < args.reps:
+                if len(test_pileups) < args.reps \
+                        or test_pileups[0].ref not in ref_bases:
                     continue
                 ctrl_pileups = \
                     tuple(i for i in base_pileups[len(args.test):] if i is not None)
@@ -463,8 +463,8 @@ if __name__ == '__main__':
                     *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test)):
                 test_pileups = \
                     tuple(i for i in test_pileups[:len(args.test)] if i is not None)
-                if test_pileups[0].ref in ref_bases \
-                        and len(test_pileups) >= args.reps \
+                if len(test_pileups) >= args.reps \
+                        and test_pileups[0].ref in ref_bases \
                         and detect(test_pileups):
                     significant_bases += 1
 
