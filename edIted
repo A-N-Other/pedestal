@@ -22,7 +22,7 @@ __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
 __version__ = '0.6'
-__stamp__ = 'GY200728'
+__stamp__ = 'GY200729'
 __status__ = 'Development'
 __license__ = 'MIT license'
 
