@@ -46,7 +46,7 @@ Stranding information is required to run `edIted`! Data must come from the seque
 ```bash
 edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-o OUTPUT] [-e EDIT]
     [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-m MIN_EDITED]
-    [-r REPLICATES] [-b BLACKLIST [BLACKLIST ...]] [-xs XS] [-q]
+    [-f FILTER] [-r REPLICATES] [-b BLACKLIST [BLACKLIST ...]] [-xs XS] [-q]
 --- usage examples ---
 samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra XS test.bam | \
 awk '$4 > 1' | \
