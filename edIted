@@ -10,7 +10,7 @@ from bisect import bisect
 from collections import Counter, defaultdict as dd
 from functools import total_ordering
 from itertools import chain
-from math import log10, pow
+from math import ceil, log10, pow
 from signal import signal, SIGPIPE, SIG_DFL
 from sys import stdout
 from typing import Any, Iterator, Tuple
@@ -22,8 +22,8 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.7'
-__stamp__ = 'GY200729'
+__version__ = '0.8'
+__stamp__ = 'GY200730'
 __status__ = 'Development'
 __license__ = 'MIT license'
 
@@ -55,7 +55,9 @@ class Pileup(object):
 
     def __init__(self, mpileup: str) -> None:
         self.mpileup = mpileup.strip().split('\t')
-        self.chrom = self.mpileup[0]
+        self.chrom = \
+            self.mpileup[0][3:] if self.mpileup[0].startswith('chr') \
+            else self.mpileup[0]
         self.pos = int(self.mpileup[1])
         self.ref = self.mpileup[2]
 
@@ -168,8 +170,10 @@ class Pileup(object):
     def is_potential_edit(self, a: str, strand: bool) -> bool:
         try:
             d = self.depth(strand)
-            return 0 < self[a, strand] >= max(d * args.min_edited, args.alt_depth) \
-                and args.depth <= d >= self.depth(not strand) * 0.01
+            return max(ceil(d * args.min_edited), args.alt_depth) \
+                <= self[a, strand] \
+                < ceil(d * args.filter) \
+                and d >= ceil(self.depth(not strand) * 0.025)
         except AttributeError:
             self._parse()
             return self.is_potential_edit(strand)
@@ -399,6 +403,11 @@ if __name__ == '__main__':
         help='minimum proportion (0 - <1) of bases at a site that must \
         display editing (see also `--alt_depth`) (default %(default)s)')
     parser.add_argument(
+        '-f', '--filter', type=float, default=0.95,
+        help='filter away edits with a frequency (>0 - 1) exceeding this \
+        value to prevent inclusion of SNPs that are not passed through \
+        `--blacklist` (default %(default)s)')
+    parser.add_argument(
         '-r', '--reps', type=int, default=1,
         help='where replicates are given, the minimum number in which editing \
         must be found (default %(default)s)')
@@ -410,9 +419,6 @@ if __name__ == '__main__':
         '-b', '--blacklist', nargs='+',
         help='file(s) containing regions (BED format) to exclude from \
         analyses, e.g. splice sites, ENCODE blacklisted regions, etc')
-    # parser.add_argument(
-    #     '-v', '--vcf', nargs='+',
-    #     help='known variations (VCF format) to exclude from analyses')
     parser.add_argument(
         '-q', '--quiet', action='store_true',
         help='silence progress reporting')
@@ -420,6 +426,8 @@ if __name__ == '__main__':
 
     if not 0.0 <= args.min_edited < 1.0:
         raise ValueError('--min_edited must be >=0.0 & <1.0')
+    if not 0.0 < args.filter <= 1.0:
+        raise ValueError('--filter must be >0.0 & <=1.0')
     if not 0 < args.reps <= len(args.test):
         raise ValueError('--reps must be >= 1 & <= number of test replicates')
     args.edit = args.edit.upper()
@@ -451,7 +459,8 @@ if __name__ == '__main__':
         for f in args.blacklist:
             for chrom, start, stop, *_ in \
                     (line.strip().split() for line in gzip.open(f, 'rt')):
-                B.update(chrom, int(start) + 1, int(stop))
+                B.update(chrom[3:] if chrom.startswith('chr') else chrom,
+                    int(start) + 1, int(stop))
                 blacklisted_regions += 1
         logger.info(f'Blacklist prepared from {blacklisted_regions} regions')
 
