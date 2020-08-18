@@ -42,15 +42,26 @@ zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.
 
 `edIted` performs stranded assessments of RNA editing from samtools mpileup data, building on the Dirichlet-based models implemented in ACCUSA2 [Piechotta (2013) Bioinf]. When run with test data alone, `edIted` runs in 'detect' mode, finding base modifications by comparing the goodness of fit of Dirchlet models of the base error (derived from the Phred quality data in the mpileup input) and the background sequencing error to the base frequencies recorded at a specific position. With an additional control dataset, `edIted` runs in 'differential' mode, performing the above analysis to determine significantly edited sites before additionally testing for differential editing by comparing the goodness of fit of Dirichlet models of the base error from the test and control datasets to their own and each other's base frequencies. When biological replicates are provided, `edIted` adjusts the reported Z scores to reflect the proportion of test dataset samples displaying editing.
 
-Stranding information is required to run `edIted`! Data must come from the sequencing of stranded libraries, which can be used by spliced aligners to record the strand of the original RNA molecule (e.g. `--rna-strandedness` for `hisat2`). To include this information `samtools mpileup` data should be produced with `--output-extra XS`, the column location of which can be passed to `edIted` with `--xs` if necessary. Allowing `samtools mpileup` to calculate BAQs is recommended to further improve the accuracy of results.
+Transcript stranding information is required to run `edIted` - data must come from the sequencing of stranded libraries and have the TS/XS tag added. Note that the XS tag is implementation-specific and the TS (transcript strand) tag has been created to standardise reporting. Currently, only HISAT2 reports an XS tag that also conforms to the TS specification and other aligners will need a TS tag adding in post-alignment processing (see below). To include this information `samtools mpileup` data should then be produced with `--output-extra TS`, the column location of which can be passed to `edIted` with `--ts` if necessary. Allowing `samtools mpileup` to calculate BAQs is recommended to further improve the accuracy of results.
 ```bash
 edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-o OUTPUT] [-e EDIT]
     [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-m MIN_EDITED]
-    [-f FILTER] [-r REPLICATES] [-b BLACKLIST [BLACKLIST ...]] [-xs XS] [-q]
---- usage examples ---
-samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra XS test.bam | \
-awk '$4 > 1' | \
-pigz > test.mpileup.gz
+    [-f FILTER] [-r REPLICATES] [-b BLACKLIST [BLACKLIST ...]] [-ts TS] [-q]
+
+--- adding TS tags ---
+STAR --outStd SAM <arguments> \
+| samtools view --no-PG -h -F268 - \
+| awk -v F="-" -v R="+" \ # First read is antisense to the originating transcript, otherwise swap + and -
+    'BEGIN { OFS="\\t"; strand[0]=F; strand[1]=R; } \
+    { if (substr(\$1,1,1)=="@") { print; next; }; \
+    s=and(\$2,0x10)/0x10; if (and(\$2,0x80)) s=1-s; print \$0,"TS:A:" strand[s]; }' \
+| samtools view --no-PG -b@2 \
+> ${name}.bam \
+&& samtools index ${name}.bam
+
+--- usage example ---
+samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra TS test.bam | \
+awk '$4 > 1' | pigz > test.mpileup.gz
 
 edIted -e TC -m 0.2 -t test.mpileup.gz -b blacklists/*.bed.gz > TC_edit_sites.bed
 edIted -r 2 -d 10 -t test1.mpileup.gz test2.mpileup -c control.mpileup.gz -o differential_AG_edit_sites.bed

@@ -71,12 +71,12 @@ class Pileup(object):
         mapping = self.mpileup[4]
         quals = self.mpileup[5]
         try:
-            strand = self.mpileup[args.xs - 1].split(',')
+            strand = self.mpileup[args.ts - 1].split(',')
             if strand[0] not in '+-':
                 raise
         except:
             raise ValueError(
-                'check the position of the `xs` information in the mpileup')
+                'check the position of the `TS` information in the mpileup')
         strand = [True if s == '+' else False for s in strand]
         i, j = 0, 0
         while i < len(mapping):
@@ -412,9 +412,9 @@ if __name__ == '__main__':
         help='where replicates are given, the minimum number in which editing \
         must be found (default %(default)s)')
     parser.add_argument(
-        '--xs', type=int, default=7,
-        help='column in the mpileup inputs in which the XS (stranding) data \
-        can be found (default %(default)s)')
+        '--ts', type=int, default=7,
+        help='column in the mpileup inputs in which the TS (originating \
+        transcript strand) data can be found (default %(default)s)')
     parser.add_argument(
         '-b', '--blacklist', nargs='+',
         help='file(s) containing regions (BED format) to exclude from \
