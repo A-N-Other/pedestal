@@ -44,9 +44,12 @@ zcat interleaved.fq.gz | deinterleave >(pigz | file_1.fq.gz) >(pigz | file_2.fq.
 
 Transcript stranding information is required to run `edIted` - data must come from the sequencing of stranded libraries and have the TS/XS tag added. Note that the XS tag is implementation-specific and the TS (transcript strand) tag has been created to standardise reporting. Currently, only HISAT2 reports an XS tag that also conforms to the TS specification and other aligners will need a TS tag adding in post-alignment processing (see below). To include this information `samtools mpileup` data should then be produced with `--output-extra TS`, the column location of which can be passed to `edIted` with `--ts` if necessary. Allowing `samtools mpileup` to calculate BAQs is recommended to further improve the accuracy of results.
 ```bash
-edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-o OUTPUT] [-e EDIT]
-    [-n NOISE] [-z Z_SCORE] [-d DEPTH] [-a ALT_DEPTH] [-m MIN_EDITED]
-    [-f FILTER] [-r REPLICATES] [-b BLACKLIST [BLACKLIST ...]] [-ts TS] [-q]
+edIted [-h] -t TEST [TEST ...] [-c CONTROL [CONTROL ...]] [-R REGION]
+    [-o OUTPUT] [-e EDIT] [-r REPS] [--detect_noise DETECT_NOISE]
+    [--differential_noise DIFFERENTIAL_NOISE] [--z_score Z_SCORE]
+    [--min_fold MIN_FOLD] [--min_depth MIN_DEPTH] [--min_alt_depth MIN_ALT_DEPTH]
+    [--min_edited MIN_EDITED] [--max_edited MAX_EDITED] [--ts TS]
+    [--blacklist BLACKLIST [BLACKLIST ...]] [-q]
 
 --- adding TS tags ---
 STAR --outStd SAM <arguments> \
@@ -59,12 +62,13 @@ STAR --outStd SAM <arguments> \
 > ${name}.bam \
 && samtools index ${name}.bam
 
---- usage example ---
+--- preparing mpileups ---
 samtools mpileup -Q 15 -q 30 -R -f indexedgenome.fa --output-extra TS test.bam | \
 awk '$4 > 1' | pigz > test.mpileup.gz
 
-edIted -e TC -m 0.2 -t test.mpileup.gz -b blacklists/*.bed.gz > TC_edit_sites.bed
-edIted -r 2 -d 10 -t test1.mpileup.gz test2.mpileup -c control.mpileup.gz -o differential_AG_edit_sites.bed
+--- running edIted ---
+edIted -e TC --min_edited 0.2 -t test.mpileup.gz --blacklist blacklists/*.bed.gz > TC_edits.bed
+edIted -r 2 --min_depth 10 -t test1.mpileup.gz test2.mpileup -c control.mpileup.gz -o differential_AG_edits.bed
 ```
 
 [**`explode`**](explode): split FASTA/Q records to new files

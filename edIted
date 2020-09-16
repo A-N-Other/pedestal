@@ -22,8 +22,8 @@ from scipy.stats import dirichlet
 __author__ = 'George R Young'
 __maintainer__ = 'George R Young'
 __email__ = 'george.young@crick.ac.uk'
-__version__ = '0.8'
-__stamp__ = 'GY200730'
+__version__ = '0.9'
+__stamp__ = 'GY200916'
 __status__ = 'Development'
 __license__ = 'MIT license'
 
@@ -55,9 +55,7 @@ class Pileup(object):
 
     def __init__(self, mpileup: str) -> None:
         self.mpileup = mpileup.strip().split('\t')
-        self.chrom = \
-            self.mpileup[0][3:] if self.mpileup[0].startswith('chr') \
-            else self.mpileup[0]
+        self.chrom = self.mpileup[0]
         self.pos = int(self.mpileup[1])
         self.ref = self.mpileup[2]
 
@@ -170,20 +168,20 @@ class Pileup(object):
     def is_potential_edit(self, a: str, strand: bool) -> bool:
         try:
             d = self.depth(strand)
-            return max(ceil(d * args.min_edited), args.alt_depth) \
+            return max(ceil(d * args.min_edited), args.min_alt_depth) \
                 <= self[a, strand] \
-                < ceil(d * args.filter) \
+                < ceil(d * args.max_edited) \
                 and d >= ceil(self.depth(not strand) * 0.025)
         except AttributeError:
             self._parse()
             return self.is_potential_edit(strand)
 
-    def a(self, strand: bool) -> np.ndarray:
+    def a(self, strand: bool, noise: float) -> np.ndarray:
         ''' unscaled alpha values for scipy.stats.dirichlet '''
         try:
             b = self.ref if strand else rc[self.ref]
             return np.array(list(
-                (0.0 if k == b else args.noise / 3) + (sum(v) / len(v) if v else 0.0)
+                (0.0 if k == b else noise / 3) + (sum(v) / len(v) if v else 0.0)
                 for k, v in self.base_probs[strand].items()))
         except AttributeError:
             self._parse()
@@ -251,6 +249,9 @@ class Blacklist(object):
             pass
         return False
 
+    def __len__(self) -> int:
+        return sum(len(v) for v in self.blacklist.values())
+
 
 # Functions ###################################################################
 
@@ -288,14 +289,14 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     strand = None
     # determine which strand matches args.edit[0] and check potential edits
     if tests[0].ref == ref \
-            and all(t.depth(True) >= args.depth for t in tests):
+            and all(t.depth(True) >= args.min_depth for t in tests):
         test = sum(tests)
         if test.is_potential_edit(alt, True) \
                 and (n_edited := 1 if len(tests) == 1 else
                      sum(t[alt, True] > 0 for t in tests)) >= args.reps:
             strand = True
     elif tests[0].ref == _ref \
-            and all(t.depth(False) >= args.depth for t in tests):
+            and all(t.depth(False) >= args.min_depth for t in tests):
         test = sum(tests)
         if test.is_potential_edit(alt, False) \
                 and (n_edited := 1 if len(tests) == 1 else
@@ -306,26 +307,29 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
     # if we're doing a differential assessment, check the control data
     if ctrls:
         ctrl = sum(ctrls)
-        if ctrl.depth(strand) < args.depth or \
-                ctrl[alt, strand] / ctrl.depth(strand) \
-                >= test[alt, strand] / test.depth(strand):
-            return False
+        try:
+            if ctrl.depth(strand) < args.min_depth or \
+                    (test[alt, strand] / test.depth(strand)) / \
+                    (ctrl[alt, strand] / ctrl.depth(strand)) < args.min_fold:
+                return False
+        except ZeroDivisionError:
+            pass
     try:
         # determine if the base displays significant editing
         scale = test.depth(strand)
         test_x = test.x(strand)
-        test_a = test.a(strand)
+        test_a = test.a(strand, args.detect_noise) * scale
         Z = log10(
-            dirichlet.pdf(test_x, test_a * scale)
+            dirichlet.pdf(test_x, test_a)
             / dirichlet.pdf(test_x, background_probs[ref] * scale))
         Z *= n_edited / len(tests)
         if Z > args.z_score:
             if ctrls:
                 # determine if the editing is differential
                 scale = min(test.depth(strand), ctrl.depth(strand))
-                test_a = test_a * scale
+                test_a = test.a(strand, args.differential_noise) * scale
                 ctrl_x = ctrl.x(strand)
-                ctrl_a = ctrl.a(strand) * scale
+                ctrl_a = ctrl.a(strand, args.differential_noise) * scale
                 Z = log10(
                     (dirichlet.pdf(test_x, test_a) * dirichlet.pdf(ctrl_x, ctrl_a))
                     / (dirichlet.pdf(ctrl_x, test_a) * dirichlet.pdf(test_x, ctrl_a)))
@@ -339,7 +343,9 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                         f'_{test[alt, strand]}_{test.depth(strand)}'
                         f'_{ctrl[alt, strand]}_{ctrl.depth(strand)}\t'
                         f'{Z:.3f}\t'
-                        f'{"+" if strand else "-"}',
+                        f'{"+" if strand else "-"}\t'
+                        f'''{",".join(f'{t[alt, strand]}_{t.depth(strand)}' for t in tests)}\t'''
+                        f'''{",".join(f'{c[alt, strand]}_{c.depth(strand)}' for c in ctrls)}''',
                         file=args.output, flush=True)
                     return True
             else:
@@ -349,7 +355,8 @@ def detect(tests: Tuple[Pileup], ctrls: Tuple[Pileup]=tuple()) -> bool:
                     f'{test.pos}\t'
                     f'{ref}{alt}_{test[alt, strand]}_{test.depth(strand)}\t'
                     f'{Z:.3f}\t'
-                    f'{"+" if strand else "-"}',
+                    f'{"+" if strand else "-"}\t'
+                    f'''{",".join(f'{t[alt, strand]}_{t.depth(strand)}' for t in tests)}''',
                     file=args.output, flush=True)
                 return True
     except ValueError:
@@ -377,46 +384,59 @@ if __name__ == '__main__':
         help='optional control/untreated mpileup file(s), which will make \
         edIted run a differential editing analysis')
     parser.add_argument(
+        '-R', '--region', type=str, default='',
+        help='only run edIted on a specific sequence (e.g. "chr1")')
+    parser.add_argument(
         '-o', '--output', type=FileType('w'), default=stdout,
         help='write output to this file instead of piping to stdout')
     parser.add_argument(
         '-e', '--edit', type=str, default='AG',
         help='search for this type of editing (default %(default)s)')
     parser.add_argument(
-        '-n', '--noise', type=float, default=0.001,
-        help='fixed error probability to spread between alt bases for \
-        modelling sequencing-independent error sources (default %(default)s)')
-    parser.add_argument(
-        '-z', '--z_score', type=float, default=1.96,
-        help='threshold Z score for discriminating the goodness of fit of \
-        Dirichlet models of nucleotide frequencies (default %(default)s)')
-    parser.add_argument(
-        '-d', '--depth', type=int, default=4,
-        help='required coverage (in each sample if biological replicates are \
-        provided) for a base to be considered (default %(default)s)')
-    parser.add_argument(
-        '-a', '--alt_depth', type=int, default=2,
-        help='minimum alt count for editing to be considered (see also \
-        `--min_edited`) (default %(default)s)')
-    parser.add_argument(
-        '-m', '--min_edited', type=float, default=0.0,
-        help='minimum proportion (0 - <1) of bases at a site that must \
-        display editing (see also `--alt_depth`) (default %(default)s)')
-    parser.add_argument(
-        '-f', '--filter', type=float, default=0.95,
-        help='filter away edits with a frequency (>0 - 1) exceeding this \
-        value to prevent inclusion of SNPs that are not passed through \
-        `--blacklist` (default %(default)s)')
-    parser.add_argument(
         '-r', '--reps', type=int, default=1,
         help='where replicates are given, the minimum number in which editing \
         must be found (default %(default)s)')
+    parser.add_argument(
+        '--detect_noise', type=float, default=0.001,
+        help='fixed error probability to spread between alt bases for \
+        modelling sequencing-independent error sources when detecting editing \
+        sites (default %(default)s)')
+    parser.add_argument(
+        '--differential_noise', type=float, default=0.01,
+        help='fixed error probability to spread between alt bases for \
+        modelling sequencing-independent error sources when determining \
+        differential editing (default %(default)s)')
+    parser.add_argument(
+        '--z_score', type=float, default=2.58,
+        help='threshold Z score for discriminating the goodness of fit of \
+        Dirichlet models of nucleotide frequencies (default %(default)s)')
+    parser.add_argument(
+        '--min_fold', type=float, default=2.0,
+        help='minimum fold difference required for differential editing to be \
+        reported at a base (default %(default)s)')
+    parser.add_argument(
+        '--min_depth', type=int, default=5,
+        help='required coverage (in each sample if biological replicates are \
+        provided) for a base to be considered (default %(default)s)')
+    parser.add_argument(
+        '--min_alt_depth', type=int, default=2,
+        help='minimum alt count for editing to be considered (see also \
+        `--min_edited`) (default %(default)s)')
+    parser.add_argument(
+        '--min_edited', type=float, default=0.01,
+        help='minimum proportion (0 - <1) of bases at a site that must \
+        display editing (see also `--min_alt_depth`) (default %(default)s)')
+    parser.add_argument(
+        '--max_edited', type=float, default=0.9,
+        help='filter away edits with a frequency (>0 - 1) exceeding this \
+        value to prevent inclusion of SNPs that are not passed through \
+        `--blacklist` (default %(default)s)')
     parser.add_argument(
         '--ts', type=int, default=7,
         help='column in the mpileup inputs in which the TS (originating \
         transcript strand) data can be found (default %(default)s)')
     parser.add_argument(
-        '-b', '--blacklist', nargs='+',
+        '--blacklist', nargs='+',
         help='file(s) containing regions (BED format) to exclude from \
         analyses, e.g. splice sites, ENCODE blacklisted regions, etc')
     parser.add_argument(
@@ -426,7 +446,7 @@ if __name__ == '__main__':
 
     if not 0.0 <= args.min_edited < 1.0:
         raise ValueError('--min_edited must be >=0.0 & <1.0')
-    if not 0.0 < args.filter <= 1.0:
+    if not 0.0 < args.max_edited <= 1.0:
         raise ValueError('--filter must be >0.0 & <=1.0')
     if not 0 < args.reps <= len(args.test):
         raise ValueError('--reps must be >= 1 & <= number of test replicates')
@@ -438,6 +458,8 @@ if __name__ == '__main__':
     ref, alt = args.edit
     _ref = rc[ref]
     ref_bases = ref + _ref
+    if args.region:
+        line_start = args.region + '\t'
 
     # Setup logging system ####################################################
 
@@ -454,15 +476,18 @@ if __name__ == '__main__':
 
     if args.blacklist:
         logger.info('Preparing blacklist')
-        blacklisted_regions = 0
         B = Blacklist()
         for f in args.blacklist:
+            logger.info(f'. {f}')
+            regions = 0
             for chrom, start, stop, *_ in \
-                    (line.strip().split() for line in gzip.open(f, 'rt')):
-                B.update(chrom[3:] if chrom.startswith('chr') else chrom,
-                    int(start) + 1, int(stop))
-                blacklisted_regions += 1
-        logger.info(f'Blacklist prepared from {blacklisted_regions} regions')
+                    (line.strip().split('\t') for line in gzip.open(f, 'rt')):
+                if args.region and chrom != args.region:
+                    continue
+                B.update(chrom, int(start) + 1, int(stop))
+                regions += 1
+            logger.info(f'.. {regions} regions')
+        logger.info(f'{len(B)} unique blacklisted regions prepared')
 
     ###########################################################################
 
@@ -470,7 +495,7 @@ if __name__ == '__main__':
     alt_freq = {k: Counter({'A': 0, 'C': 0, 'G': 0, 'T': 0}) for k in 'ACGT'}
     aligned_pileups = shared_elements(
         *((Pileup(line) for line in gzip.open(f, 'rt')) for f in args.test))
-    for _ in range(2_500_000):
+    for _ in range(1_000_000):
         try:
             base = sum(next(aligned_pileups))
             if base.ref != 'N':
@@ -482,7 +507,7 @@ if __name__ == '__main__':
     for base in 'ACGT':
         total = sum(alt_freq[base].values())
         background_probs[base] = np.array(list({
-            k: (v / total) + (0.0 if k == base else args.noise / 3)
+            k: (v / total) + (0.0 if k == base else args.detect_noise / 3)
             for k, v in alt_freq[base].items()}.values()))
     del(aligned_pileups, alt_freq, base, total)
 
@@ -498,9 +523,22 @@ if __name__ == '__main__':
               file=args.output, flush=True)
 
         if len(args.test) == 1 == len(args.control):
-            aligned_pileups = shared_elements(
-                (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
-                (Pileup(line) for line in gzip.open(args.control[0], 'rt')))
+            if args.region:
+                aligned_pileups = shared_elements(
+                    (Pileup(line) for line in gzip.open(args.test[0], 'rt')
+                        if line.startswith(line_start)),
+                    (Pileup(line) for line in gzip.open(args.control[0], 'rt')
+                        if line.startswith(line_start)))
+            else:
+                aligned_pileups = shared_elements(
+                    (Pileup(line) for line in gzip.open(args.test[0], 'rt')),
+                    (Pileup(line) for line in gzip.open(args.control[0], 'rt')))
+        elif args.region:
+            aligned_pileups = align_elements(
+                *((Pileup(line) for line in gzip.open(f, 'rt')
+                    if line.startswith(line_start)) for f in args.test),
+                *((Pileup(line) for line in gzip.open(f, 'rt')
+                    if line.startswith(line_start)) for f in args.control))
         else:
             aligned_pileups = align_elements(
                 *((Pileup(line) for line in gzip.open(f, 'rt'))
@@ -529,8 +567,17 @@ if __name__ == '__main__':
             file=args.output, flush=True)
 
         if len(args.test) == 1:
-            aligned_pileups = \
-                ((Pileup(line),) for line in gzip.open(args.test[0], 'rt'))
+            if args.region:
+                aligned_pileups = \
+                    ((Pileup(line),) for line in gzip.open(args.test[0], 'rt')
+                        if line.startswith(line_start))
+            else:
+                aligned_pileups = \
+                    ((Pileup(line),) for line in gzip.open(args.test[0], 'rt'))
+        elif args.region:
+            aligned_pileups = align_elements(
+                *((Pileup(line) for line in gzip.open(f, 'rt')
+                    if line.startswith(line_start)) for f in args.test))
         else:
             aligned_pileups = align_elements(
                 *((Pileup(line) for line in gzip.open(f, 'rt'))
